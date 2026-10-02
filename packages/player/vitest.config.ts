@@ -20,6 +20,8 @@ export default defineConfig({
   },
   test: {
     environment: "happy-dom",
+    // Let happy-dom provide storage instead of Node's experimental global.
+    execArgv: ["--no-experimental-webstorage"],
     setupFiles: ["./src/slideshow/test-setup.ts"],
   },
 });
