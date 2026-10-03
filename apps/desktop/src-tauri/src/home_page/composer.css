@@ -357,7 +357,9 @@
   color: var(--fg-3);
 }
 .ov-chat-agent-always {
+  /* The lead ("Main") row has no switch: its text spans the gear and switch columns. */
   grid-column: 3 / -1;
+  justify-self: end;
   padding-right: 4px;
   color: var(--fg-3);
   font-size: var(--text-xs);

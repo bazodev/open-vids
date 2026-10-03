@@ -202,7 +202,7 @@ export function AgentsMenu({ chat }: { chat: ChatSummary }) {
         <div className={rowClass} data-agent="director">
           <AgentMonogram agent="director" />
           <AgentInfo name={chatAgentName("director")} role={t("chat.agents.directorRole")} />
-          <span className="col-span-2 col-start-3 pr-1 text-xs whitespace-nowrap text-fg-3">
+          <span className="col-span-2 col-start-3 justify-self-end pr-1 text-xs whitespace-nowrap text-fg-3">
             {t("chat.agents.alwaysOn")}
           </span>
         </div>

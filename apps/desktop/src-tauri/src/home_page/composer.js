@@ -673,15 +673,10 @@
           node("span", "ov-chat-agent-name", lead()),
           node("span", "ov-chat-agent-role", T("home.composer.lead.role")),
         );
-        const always = button("sw", T("home.composer.lead.alwaysOnAria", { agent: lead() }));
-        always.setAttribute("role", "switch");
-        always.setAttribute("aria-checked", "true");
-        always.disabled = true;
         main.append(
           monogram(T("home.composer.lead.mono")),
           info,
           node("span", "ov-chat-agent-always", T("home.composer.lead.alwaysOn")),
-          always,
         );
         content.appendChild(main);
         AGENTS.forEach((a) => {

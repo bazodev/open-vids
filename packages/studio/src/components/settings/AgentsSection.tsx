@@ -70,9 +70,11 @@ const AGENT_TEXT: Record<
   },
 };
 
-/** Agent, Model, Thinking effort, On — the prototype's `.st-agents` columns. */
+/** Agent, Model, Thinking effort, On — the prototype's `.st-agents` columns. The last column sizes to its
+    content (`auto`, not a fixed toggle width) so the Director's "Always on" text fits while every row's
+    right edge still lines up: switches and the header cell stay `justify-self-end`. */
 const AGENT_GRID =
-  "grid grid-cols-[minmax(0,1fr)_152px_144px_28px] items-center gap-3 px-3 [&:lang(ru)]:grid-cols-[minmax(0,1fr)_184px_192px_28px]";
+  "grid grid-cols-[minmax(0,1fr)_152px_144px_auto] items-center gap-3 px-3 [&:lang(ru)]:grid-cols-[minmax(0,1fr)_184px_192px_auto]";
 
 /** ModelPicker in the prototype's 28 px window-form `.sel` look, caret at the right edge. */
 const MODEL_TRIGGER =
@@ -376,13 +378,11 @@ export function AgentsSection() {
             onChange={(thinking) => commit({ director: { model: director.model, thinking } })}
           />
           <Tooltip label={t("settings.studio.ag.alwaysOnTip")} side="left">
-            <span className="justify-self-end">
-              <Toggle
-                label={t("settings.agents.director.alwaysOn.aria")}
-                checked
-                disabled
-                onCommit={() => {}}
-              />
+            <span
+              className="justify-self-end text-xs whitespace-nowrap text-fg-3"
+              data-testid="director-always-on"
+            >
+              {t("settings.studio.ag.alwaysOn")}
             </span>
           </Tooltip>
         </div>

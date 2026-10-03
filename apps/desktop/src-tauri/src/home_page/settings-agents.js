@@ -81,7 +81,7 @@
         bad || missing ? "is-warn" : "",
       )}${warn}</div>${seg(efforts(cfg.thinking), cfg.thinking || "", "agent-effort", tr("settings.agents.effortAria", { agent: ag.name }), ag.id)}${
         dir
-          ? `<span data-tip="${esc(tr("settings.agents.director.alwaysOn.tip"))}" data-tip-align="end">${sw(true, "agent-on", tr("settings.agents.director.alwaysOn.aria"), ag.id, true)}</span>`
+          ? `<span class="st-always" data-tip="${esc(tr("settings.agents.director.alwaysOn.tip"))}" data-tip-align="end">${esc(tr("settings.agents.director.alwaysOn.text"))}</span>`
           : sw(
               cfg.enabledByDefault,
               "agent-on",
