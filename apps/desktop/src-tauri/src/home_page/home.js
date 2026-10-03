@@ -72,7 +72,7 @@
   $("#viewGrid").innerHTML = ic("grid", 14);
   $("#viewList").innerHTML = ic("list", 14);
   paintChrome();
-  $("#settingsBtn").innerHTML = ic("settings");
+  $("#settingsBtn").innerHTML = ic("settings", 16);
   $("#settingsBtn").setAttribute("aria-haspopup", "dialog");
   $("#settingsBtn").setAttribute("aria-expanded", "false");
   $("#reportBtn").innerHTML = ic("bug");

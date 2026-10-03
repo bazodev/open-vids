@@ -2,7 +2,6 @@ import { useEffect, type KeyboardEvent, type ReactNode } from "react";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import {
   CircleHalf,
-  GearSix,
   Gauge,
   ImageSquare,
   Lightning,
@@ -17,6 +16,7 @@ import type { AgentStore } from "../../agent/agentStore";
 import { AssetSearchPolicyView } from "../../research/AssetSearchPolicyView";
 import { cn } from "../ui/cn";
 import { Pill } from "../ui/Status";
+import { StudioGear } from "../ui/StudioGear";
 import { AgentsSection } from "./AgentsSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { ExecutionSection } from "./ExecutionSection";
@@ -35,7 +35,7 @@ const SECTION_META: Record<
   general: {
     group: "settings.nav.group.app",
     label: "settings.section.general",
-    icon: <GearSix />,
+    icon: <StudioGear />,
   },
   appearance: {
     group: "settings.nav.group.app",

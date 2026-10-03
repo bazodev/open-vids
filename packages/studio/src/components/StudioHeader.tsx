@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { CaretLeft, Export, GearSix } from "@phosphor-icons/react";
+import { CaretLeft, Export } from "@phosphor-icons/react";
 import { useTranslation } from "../i18n";
 import { useStudioShellContext } from "../contexts/StudioContext";
 import { usePanelLayoutContext } from "../contexts/PanelLayoutContext";
@@ -15,6 +15,7 @@ import {
 } from "./shell/TitlebarControls";
 import { ReportProblemButton } from "./shell/ReportProblemButton";
 import { Button, IconButton, OpenvidsLogo, Tooltip } from "./ui";
+import { StudioGear } from "./ui/StudioGear";
 
 /**
  * Inside OpenVids the logo becomes a back button to the Projects home
@@ -118,7 +119,7 @@ export function StudioHeader() {
         <Tooltip label={t("shell.header.settings")} side="bottom">
           <IconButton
             aria-label={t("shell.header.settings")}
-            icon={<GearSix size={14} />}
+            icon={<StudioGear />}
             onClick={() => openSettings()}
           />
         </Tooltip>

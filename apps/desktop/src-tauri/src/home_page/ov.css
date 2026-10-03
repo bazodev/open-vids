@@ -248,6 +248,12 @@ button {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* The Settings gear is a filled cog (ICONS.settings), not an outline: the
+   sprite's stroke must not hairline its teeth. Render at the whole-pixel 16
+   with geometric precision so it stays crisp at 1.75x. */
+#settingsBtn .ic {
+  shape-rendering: geometricPrecision;
+}
 
 /* ---- Focus ring (shared) ---- */
 .btn:focus-visible,
