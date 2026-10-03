@@ -100,15 +100,20 @@ impl Head {
 }
 
 /// Whether this request needs the token: every `/api` request plus any
-/// mutating method. Plain page/asset/thumbnail GETs stay open.
+/// mutating method. Plain page/asset/thumbnail GETs stay open. So does the
+/// About sheet read (`GET /api/menu/about`): like the locales it only serves
+/// static strings, and the title-bar app menu fetches it with plain `fetch`.
 ///
-/// One deliberate exception: `POST /api/report/open`, which the Studio
+/// One more deliberate exception: `POST /api/report/open`, which the Studio
 /// sidecar's page calls (it has no token — it is a different loopback origin)
 /// to open or focus the bug-report window. It only opens a window: no data in
 /// or out. `origin_allowed` still demands a loopback origin for it, so a
 /// visited website cannot reach even this route.
 pub fn requires_token(method: &str, path: &str) -> bool {
     if is_report_open(method, path) {
+        return false;
+    }
+    if method.eq_ignore_ascii_case("GET") && path == "/api/menu/about" {
         return false;
     }
     if path.starts_with("/api/") {
@@ -166,6 +171,28 @@ pub fn origin_allowed(head: &Head, port: u16) -> bool {
     true
 }
 
+/// Whether a cross-origin loopback `Origin` (Studio's own server, already
+/// matched against the live sidecar origin by the caller) may post menu
+/// actions to this home port: loopback with an explicit port only, never a
+/// remote host, `file:`, or a port-less value.
+pub fn origin_allowed_studio_origin(origin: &str, port: u16) -> bool {
+    let _ = port;
+    let Some(rest) = origin.strip_prefix("http://") else {
+        return false;
+    };
+    let (host, port_text) = match rest.rsplit_once(':') {
+        Some((host, port_text)) => (host, port_text),
+        None => return false,
+    };
+    if host != "127.0.0.1" && host != "localhost" {
+        return false;
+    }
+    match port_text.parse::<u16>() {
+        Ok(value) => value != 0,
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,6 +225,9 @@ mod tests {
         assert!(requires_token("DELETE", "/api/whatever"));
         assert!(!requires_token("GET", "/"));
         assert!(!requires_token("GET", "/thumb/abc.jpg"));
+        // The About read only serves static strings (name, version, site).
+        assert!(!requires_token("GET", "/api/menu/about"));
+        assert!(requires_token("POST", "/api/menu/about"));
     }
 
     #[test]
@@ -313,6 +343,18 @@ mod tests {
         ));
         // No headers at all (curl, HTTP/1.0): allowed, token still applies.
         assert!(origin_allowed(&head("GET", "/", &[]), port));
+    }
+
+    #[test]
+    fn studio_origins_allow_loopback_with_a_port_only() {
+        assert!(origin_allowed_studio_origin("http://127.0.0.1:5210", 57035));
+        assert!(origin_allowed_studio_origin("http://localhost:5210", 57035));
+        assert!(!origin_allowed_studio_origin("http://192.168.1.5:5210", 57035));
+        assert!(!origin_allowed_studio_origin("http://example.com:5210", 57035));
+        assert!(!origin_allowed_studio_origin("http://127.0.0.1", 57035));
+        assert!(!origin_allowed_studio_origin("http://127.0.0.1:abc", 57035));
+        assert!(!origin_allowed_studio_origin("https://127.0.0.1:5210", 57035));
+        assert!(!origin_allowed_studio_origin("file:///etc/passwd", 57035));
     }
 
     #[test]

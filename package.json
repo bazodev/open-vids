@@ -37,7 +37,7 @@
     "test:regression": "bun run --cwd packages/producer test:regression",
     "player:perf": "bun run --filter @hyperframes/player perf",
     "format:check": "oxfmt --check .",
-    "test:scripts": "node --import tsx --test scripts/check-workspace-contracts.test.mjs scripts/check-media-use-copy-parity.test.mjs scripts/check-svg-sanitize-parity.test.mjs scripts/check-media-use-svg-sanitize-generated.test.mjs scripts/check-package-cycles.test.mjs scripts/package-subpaths.test.mjs scripts/cli-options.test.ts scripts/check-locales.test.ts scripts/desktop-version.test.ts scripts/lint-skills.test.mjs",
+    "test:scripts": "node --import tsx --test scripts/check-workspace-contracts.test.mjs scripts/check-media-use-copy-parity.test.mjs scripts/check-svg-sanitize-parity.test.mjs scripts/check-media-use-svg-sanitize-generated.test.mjs scripts/check-package-cycles.test.mjs scripts/package-subpaths.test.mjs scripts/cli-options.test.ts scripts/check-locales.test.ts scripts/desktop-version.test.ts scripts/stage-runtime.test.mjs scripts/lint-skills.test.mjs",
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "test:skills": "HYPERFRAMES_MEDIA_HOME_REQUIRED=1 node --import ./packages/cli/scripts/test-home.mjs --test 'skills/**/*.test.mjs' 'packages/cli/src/media-use/**/*.test.mjs'",
     "typecheck": "bun run --filter '*' typecheck"

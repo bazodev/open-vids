@@ -1,7 +1,9 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, Copy, WarningCircle } from "@phosphor-icons/react";
 import { Button } from "../ui/Button";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import { isMacPlatform } from "../../utils/platform";
+import { readOpenvidsHomeOrigin } from "../../utils/openvidsHost";
 import type { FfmpegStatus } from "./useFfmpegStatus";
 import { useTranslation } from "../../i18n";
 
@@ -17,6 +19,13 @@ const CUE_MS = 1600;
  * that, and nothing said so. Saying it before the work starts, with a command
  * they can paste, is the whole point, so the command is the loudest element
  * here and not the apology.
+ *
+ * Inside the OpenVids desktop shell the install button lives on the Projects
+ * page (onboarding's System step and Settings; the home server owns the
+ * token-gated `/api/system/install/ffmpeg` route), so on Windows the notice
+ * links back there instead of repeating the macOS/Homebrew wording. Studio
+ * deliberately builds no second downloader: the link is the whole Windows
+ * route.
  */
 export const FfmpegRequiredNotice = memo(function FfmpegRequiredNotice({
   status,
@@ -29,9 +38,15 @@ export const FfmpegRequiredNotice = memo(function FfmpegRequiredNotice({
 }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const homeOrigin = useMemo(() => readOpenvidsHomeOrigin(), []);
+  // The server's command is authoritative: the dev server already maps the
+  // platform to its install command, so a Homebrew line never renders from a
+  // stale client-side assumption. `isMacPlatform` only decides whether the
+  // Projects-page setup link (whose download button the home server owns)
+  // applies: never on macOS, where the wording already fits.
+  const showSetupLink = homeOrigin !== null && !isMacPlatform();
   // A recheck that finds nothing changes no other pixel on screen, so without
   // this the button reads as broken at the exact moment the user is most
-  // unsure. Motion alone would not do: the result has to survive being missed.
   const [recheckFailed, setRecheckFailed] = useState(false);
   const wasChecking = useRef(false);
   const cueTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -102,14 +117,26 @@ export const FfmpegRequiredNotice = memo(function FfmpegRequiredNotice({
         >
           {checking ? t("renders.ffmpeg.checking") : t("renders.ffmpeg.checkAgain")}
         </Button>
-        <a
-          href={DOWNLOAD_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="rounded-xs text-xs text-fg-2 underline decoration-border-strong underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
-        >
-          {t("renders.ffmpeg.otherOptions")}
-        </a>
+        {showSetupLink && homeOrigin ? (
+          <button
+            type="button"
+            className="rounded-xs text-xs text-fg-2 underline decoration-border-strong underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+            onClick={() => {
+              window.location.href = homeOrigin;
+            }}
+          >
+            {t("renders.ffmpeg.openProjectsSetup")}
+          </button>
+        ) : (
+          <a
+            href={DOWNLOAD_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-xs text-xs text-fg-2 underline decoration-border-strong underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+          >
+            {t("renders.ffmpeg.otherOptions")}
+          </a>
+        )}
         {/* Last in the row and only ever appended, so appearing and vanishing
             moves nothing that sits before it. */}
         <span aria-live="polite" className="ml-auto text-xs text-fg-2">

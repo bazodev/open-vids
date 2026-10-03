@@ -1,6 +1,7 @@
 import { Eye, EyeSlash, Waveform } from "@phosphor-icons/react";
 import { ClipboardList, Film, Square, Type, X } from "../../icons/SystemIcons";
 import { useTranslation } from "../../i18n";
+import { resolveShortcutKey } from "../../utils/platform";
 import { IconButton } from "../ui";
 
 export type InspectorElementKind = "text" | "media" | "audio" | "other";
@@ -82,7 +83,7 @@ export function PropertyPanelFlatHeader({
           <IconButton
             size="sm"
             aria-label={t("inspector.header.ungroup")}
-            title={t("inspector.header.ungroupHint", { key: "⌘⇧G" })}
+            title={t("inspector.header.ungroupHint", { key: resolveShortcutKey("⌘⇧G") })}
             icon={<UngroupGlyph />}
             onClick={() => {
               onUngroup?.();

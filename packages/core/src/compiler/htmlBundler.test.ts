@@ -59,6 +59,8 @@ function readBundledColorGradingLutSrc(bundled: string): string | undefined {
 
 // Mirror the repo convention (preview.test.ts): skip symlink cases on
 // non-symlink-privileged Windows runners rather than crash the suite.
+// `symlinkSync` needs the SeCreateSymbolicLinkPrivilege (admin or Developer
+// Mode) there; without it the call throws EPERM.
 function tryCreateSymlink(target: string, path: string, type: "dir" | "file"): boolean {
   try {
     symlinkSync(target, path, type);
@@ -71,11 +73,15 @@ function tryCreateSymlink(target: string, path: string, type: "dir" | "file"): b
 function makeSymlinkProject(
   projectFiles: Record<string, string>,
   secretCss: string,
-): { dir: string; outsideDir: string } {
+): { dir: string; outsideDir: string } | null {
   const outsideDir = mkdtempSync(join(tmpdir(), "hf-outside-"));
   writeFileSync(join(outsideDir, "secret.css"), secretCss);
   const dir = makeTempProject(projectFiles);
-  symlinkSync(join(outsideDir, "secret.css"), join(dir, "evil.css"));
+  if (!tryCreateSymlink(join(outsideDir, "secret.css"), join(dir, "evil.css"), "file")) {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+    return null;
+  }
   return { dir, outsideDir };
 }
 
@@ -1699,7 +1705,7 @@ describe("bundleToSingleHtml", () => {
 
   describe("symlink path traversal (security: F-005)", () => {
     it("does not inline CSS from a symlink pointing outside projectDir", async () => {
-      const { dir, outsideDir } = makeSymlinkProject(
+      const project = makeSymlinkProject(
         {
           "index.html": `<!doctype html><html><head>
 <link rel="stylesheet" href="evil.css"></head>
@@ -1707,15 +1713,19 @@ describe("bundleToSingleHtml", () => {
         },
         ".outside-secret { color: red; }",
       );
+      // No symlink privilege on this runner (Windows without Developer
+      // Mode): nothing to attack with, so the case is vacuously safe.
+      if (project === null) return;
       try {
-        expect(await bundleToSingleHtml(dir)).not.toContain("outside-secret");
+        expect(await bundleToSingleHtml(project.dir)).not.toContain("outside-secret");
       } finally {
-        rmSync(outsideDir, { recursive: true, force: true });
+        rmSync(project.dir, { recursive: true, force: true });
+        rmSync(project.outsideDir, { recursive: true, force: true });
       }
     });
 
     it("does not inline CSS via @import through a symlink pointing outside projectDir", async () => {
-      const { dir, outsideDir } = makeSymlinkProject(
+      const project = makeSymlinkProject(
         {
           "index.html": `<!doctype html><html><head>
 <link rel="stylesheet" href="main.css"></head>
@@ -1724,10 +1734,14 @@ describe("bundleToSingleHtml", () => {
         },
         ".import-secret { color: blue; }",
       );
+      // No symlink privilege on this runner (Windows without Developer
+      // Mode): nothing to attack with, so the case is vacuously safe.
+      if (project === null) return;
       try {
-        expect(await bundleToSingleHtml(dir)).not.toContain("import-secret");
+        expect(await bundleToSingleHtml(project.dir)).not.toContain("import-secret");
       } finally {
-        rmSync(outsideDir, { recursive: true, force: true });
+        rmSync(project.dir, { recursive: true, force: true });
+        rmSync(project.outsideDir, { recursive: true, force: true });
       }
     });
   });

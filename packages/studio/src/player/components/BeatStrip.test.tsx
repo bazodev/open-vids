@@ -74,7 +74,9 @@ function mountBeatStrip(renderTimeRange?: { start: number; end: number }) {
 }
 
 function firstBeat(): HTMLDivElement {
-  const beat = document.querySelector<HTMLDivElement>('[title="Drag to move · ⌥-click to delete"]');
+  const beat = document.querySelector<HTMLDivElement>(
+    '[title="Drag to move · ⌥-click to delete"], [title="Drag to move · Alt-click to delete"]',
+  );
   if (!beat) throw new Error("Expected a beat handle");
   return beat;
 }
@@ -109,6 +111,8 @@ function expectCommittedBeatAt(time: number): void {
 beforeEach(() => {
   commitBeatEditsSpy.mockClear();
   requestSeek.mockReset();
+  /* The hint spells ⌥ on macOS and Alt elsewhere: pin macOS so the Mac titles below hold. */
+  vi.stubGlobal("navigator", { platform: "MacIntel" });
   usePlayerStore.setState({
     timelineSessionEpoch: 1,
     timelineProjectId: "project-a",
@@ -254,7 +258,7 @@ describe("BeatStrip gesture ownership", () => {
       );
     });
 
-    expect(document.querySelectorAll('[title="Drag to move · ⌥-click to delete"]')).toHaveLength(2);
+    expect(document.querySelectorAll('[title^="Drag to move ·"]')).toHaveLength(2);
     expect(commitBeatEditsSpy).not.toHaveBeenCalled();
 
     act(() => {
@@ -293,7 +297,7 @@ describe("BeatStrip gesture ownership", () => {
     });
 
     const lefts = Array.from(
-      document.querySelectorAll<HTMLDivElement>('[title="Drag to move · ⌥-click to delete"]'),
+      document.querySelectorAll<HTMLDivElement>('[title^="Drag to move ·"]'),
       (beat) => beat.style.left,
     );
     expect(lefts).toContain("128px");
@@ -305,9 +309,7 @@ describe("BeatStrip gesture ownership", () => {
   it("keeps the first pointer in control when a second touch starts", () => {
     mountBeatStrip();
     startBeatDrag();
-    const beats = document.querySelectorAll<HTMLDivElement>(
-      '[title="Drag to move · ⌥-click to delete"]',
-    );
+    const beats = document.querySelectorAll<HTMLDivElement>('[title^="Drag to move ·"]');
     act(() => {
       beats[1]?.dispatchEvent(
         pointerEvent("pointerdown", {

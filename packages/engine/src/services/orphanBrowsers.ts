@@ -7,7 +7,7 @@
  * whose owner is gone. A live owner's browsers are never touched, and a record whose pid now belongs to an
  * unrelated program is dropped, not killed.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,9 +28,36 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/** The command line of `pid` on Windows, or null when it is gone or cannot be read. */
+function windowsCommandOf(pid: number): string | null {
+  try {
+    // `tasklist` only reports the image name, while Chrome is identified by its
+    // command line (headless-shell, `puppeteer_dev_chrome_profile`), so read it
+    // through CIM the way the CLI's process-identity lookups do.
+    const output = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue; if ($p) { $p.CommandLine }`,
+      ],
+      {
+        encoding: "utf-8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    ).trim();
+    return output || null;
+  } catch {
+    return null;
+  }
+}
+
 /** The command line of `pid`, or null when it is gone or cannot be read. */
 function commandOf(pid: number): string | null {
-  if (process.platform === "win32") return null;
+  if (process.platform === "win32") return windowsCommandOf(pid);
   try {
     return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
       encoding: "utf-8",
@@ -41,7 +68,26 @@ function commandOf(pid: number): string | null {
   }
 }
 
-const looksLikeChrome = (command: string) => /chrom/i.test(command);
+/**
+ * Ends the browser and, on Windows, the helpers Chrome spawned beneath it.
+ * Throws when the process is already gone, so the caller drops the record
+ * without counting a kill — the same contract `process.kill` has on POSIX.
+ */
+function killBrowser(pid: number): void {
+  if (process.platform === "win32") {
+    try {
+      const result = spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+        timeout: 10_000,
+      });
+      if (result.status === 0) return;
+    } catch {
+      // Fall through to the direct kill below.
+    }
+  }
+  process.kill(pid, "SIGKILL");
+}
 
 /** Notes that this process owns the browser `browserPid`. Best effort: the registry is a safety net, not a contract. */
 export function recordBrowserOwner(browserPid: number, root: string = tmpdir()): void {
@@ -94,9 +140,9 @@ export function sweepOrphanBrowsers(root: string = tmpdir()): number[] {
     }
     if (ownerPid === process.pid || isAlive(ownerPid)) continue;
     const command = commandOf(browserPid);
-    if (command !== null && looksLikeChrome(command)) {
+    if (command !== null && /chrom/i.test(command)) {
       try {
-        process.kill(browserPid, "SIGKILL");
+        killBrowser(browserPid);
         killed.push(browserPid);
       } catch {
         // Already gone.

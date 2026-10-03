@@ -48,7 +48,7 @@
     stop: () => OVS.signin.stop(),
     view() {
       const head = title(tr("onboarding.models.title"), tr("onboarding.models.lede"));
-      const foot = `<p class="st-foot">${esc(tr("onboarding.models.foot"))}</p>`;
+      const foot = `<p class="st-foot">${esc(OV.pt("onboarding.models.foot"))}</p>`;
       if (!S.providers)
         return (
           head +

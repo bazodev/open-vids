@@ -4,7 +4,11 @@
  * keeps native addons and headless Chrome out of the server, and lets Abort stop the whole process tree.
  */
 
-import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
+import {
+  spawnSync as nodeSpawnSync,
+  spawn as nodeSpawn,
+  type ChildProcess,
+} from "node:child_process";
 
 const KILL_GRACE_MS = 3000;
 
@@ -54,6 +58,20 @@ let exitHookInstalled = false;
 
 /** Signals the child's whole process group (the CLI and whatever it started: whisper, sherpa, Chrome). */
 function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  // A signal only reaches the direct child on Windows, so escalate to
+  // `taskkill /T` and reap the CLI's descendants (recognizers, Chrome) too.
+  if (process.platform === "win32" && child.pid !== undefined) {
+    try {
+      const result = nodeSpawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+        timeout: 10_000,
+      });
+      if (result.status === 0) return;
+    } catch {
+      // Fall through to the direct kill below.
+    }
+  }
   try {
     if (process.platform !== "win32" && child.pid !== undefined) process.kill(-child.pid, signal);
     else child.kill(signal);
@@ -99,6 +117,9 @@ export function runCli(
     // Own process group on POSIX so Abort reaches every process the CLI started.
     detached: process.platform !== "win32",
     env: process.env,
+    // A GUI-launched server has no console; without this every CLI child
+    // flashes one on Windows. No-op on POSIX.
+    windowsHide: true,
   });
   installExitHook();
   running.add(child);

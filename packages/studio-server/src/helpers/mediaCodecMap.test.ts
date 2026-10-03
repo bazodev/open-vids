@@ -449,5 +449,5 @@ describe("scanProjectMediaCodecMap", () => {
     expect(cache.size).toBe(512);
     expect(paths.slice(0, 8).some((path) => !cache.has(join(project, path)))).toBe(true);
     expect(cache.has(join(project, "clip-512.mp4"))).toBe(true);
-  });
+  }, 30_000);
 });

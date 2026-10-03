@@ -102,6 +102,7 @@ pub fn shutdown() {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn reset() {
     JOB.reset()
 }
@@ -137,13 +138,7 @@ mod tests {
 
     #[test]
     fn an_install_runs_to_done_and_a_second_start_while_running_joins_it() {
-        let script = r#"
-echo '{"event":"start"}'
-echo '{"event":"progress","downloaded":50,"total":100}'
-sleep 1
-echo '{"event":"progress","downloaded":100,"total":100}'
-echo '{"event":"done","path":"/fake/chrome","source":"download"}'
-"#;
+        let script = "console.log(JSON.stringify({event:'start'}));\nconsole.log(JSON.stringify({event:'progress',downloaded:50,total:100}));\nawait Bun.sleep(1000);\nconsole.log(JSON.stringify({event:'progress',downloaded:100,total:100}));\nconsole.log(JSON.stringify({event:'done',path:'/fake/chrome',source:'download'}));\n";
         with_fake_cli(script, || {
             JOB.reset();
             assert!(start().is_active());
@@ -160,13 +155,13 @@ echo '{"event":"done","path":"/fake/chrome","source":"download"}'
 
     #[test]
     fn an_error_event_and_an_unexpected_exit_are_failures() {
-        with_fake_cli(r#"echo '{"event":"start"}'; echo '{"event":"error","message":"no network"}'; exit 1"#, || {
+        with_fake_cli("console.log(JSON.stringify({event:'start'}));\nconsole.log(JSON.stringify({event:'error',message:'no network'}));\nprocess.exit(1);\n", || {
             JOB.reset();
             start();
             let s = wait_for(&JOB, "failed", |s| s.phase == "failed");
             assert_eq!(s.error.as_deref(), Some("no network"));
         });
-        with_fake_cli(r#"echo '{"event":"start"}'; exit 7"#, || {
+        with_fake_cli("console.log(JSON.stringify({event:'start'}));\nprocess.exit(7);\n", || {
             JOB.reset();
             start();
             let s = wait_for(&JOB, "failed", |s| s.phase == "failed");
@@ -174,22 +169,52 @@ echo '{"event":"done","path":"/fake/chrome","source":"download"}'
         });
     }
 
+    /// The fake CLI spawns a grandchild sleeper in the same tree and reports
+    /// its pid; cancel must take the leader and the sleeper together —
+    /// via the process group on unix, the Job Object on Windows.
     #[test]
-    fn cancel_kills_the_whole_group_and_stays_cancelled() {
-        // The shell and its sleeper share the group; neither may survive.
+    fn cancel_kills_the_whole_tree_and_stays_cancelled() {
         let pid_file = std::env::temp_dir().join(format!("openvids-sleeper-{}", std::process::id()));
         let _ = std::fs::remove_file(&pid_file);
+        #[cfg(unix)]
+        let spawn_line = "const s = spawn('sleep', ['60'], { stdio: 'ignore' });";
+        #[cfg(windows)]
+        let spawn_line = "const s = spawn('ping', ['-n', '60', '127.0.0.1'], { stdio: 'ignore' });";
+        // `display()` on Windows yields backslashes, which are escapes inside
+        // the JS single-quoted string below — double them first (no-op on unix).
+        let pid_js = pid_file.display().to_string().replace('\\', "\\\\");
         let script = format!(
-            "echo '{{\"event\":\"start\"}}'\nsleep 60 &\necho $! > '{}'\necho '{{\"event\":\"progress\",\"downloaded\":1,\"total\":9}}'\nsleep 60\n",
-            pid_file.display()
+            "import {{ spawn }} from 'node:child_process';\nimport {{ writeFileSync }} from 'node:fs';\nconsole.log(JSON.stringify({{event:'start'}}));\n{spawn_line}\nwriteFileSync('{pid_js}', String(s.pid));\nconsole.log(JSON.stringify({{event:'progress',downloaded:1,total:9}}));\nawait new Promise(() => {{}});\n",
         );
         with_fake_cli(&script, || {
             JOB.reset();
             start();
-            wait_for(&JOB, "downloading", |s| s.phase == "downloading");
             let pid = JOB.pid().expect("a running job has a pid");
-            let sleeper: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+            // The sleeper pid lands a breath after the progress line: the job
+            // may report `downloading` before the fake CLI flushes the file.
+            let sleeper: u32 = {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    if let Ok(text) = std::fs::read_to_string(&pid_file) {
+                        if let Ok(pid) = text.trim().parse() {
+                            break pid;
+                        }
+                    }
+                    assert!(std::time::Instant::now() < deadline, "the fake CLI never reported its sleeper");
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            };
             assert!(process_alive(pid) && process_alive(sleeper));
+            struct Sweep(u32, u32);
+            impl Drop for Sweep {
+                fn drop(&mut self) {
+                    // Never leave a sleeper behind to lock files or block
+                    // later builds: the job kill should have taken both.
+                    crate::proc::kill_group_now(self.0);
+                    crate::proc::kill_group_now(self.1);
+                }
+            }
+            let _sweep = Sweep(pid, sleeper);
             assert_eq!(cancel().phase, "cancelled");
             wait_for(&JOB, "reaped", |_| JOB.pid().is_none());
             assert!(!process_alive(pid), "the leader is gone and reaped");
@@ -202,10 +227,15 @@ echo '{"event":"done","path":"/fake/chrome","source":"download"}'
         let _ = std::fs::remove_file(&pid_file);
     }
 
+    /// Unix-only: a child that traps and ignores SIGTERM must still die —
+    /// cancel escalates to SIGKILL after the grace period. Windows has no
+    /// signals, so the plain hanging tree dying on cancel is already covered
+    /// by `cancel_kills_the_whole_tree_and_stays_cancelled`.
+    #[cfg(unix)]
     #[test]
     fn cancel_escalates_to_sigkill_for_a_child_that_ignores_sigterm() {
         with_fake_cli(
-            "trap '' TERM\necho '{\"event\":\"start\"}'\nwhile true; do sleep 1; done\n",
+            "process.on('SIGTERM', () => {});\nconsole.log(JSON.stringify({event:'start'}));\nawait new Promise(() => {});\n",
             || {
                 JOB.reset();
                 start();
@@ -238,7 +268,7 @@ echo '{"event":"done","path":"/fake/chrome","source":"download"}'
     #[test]
     fn a_job_past_its_timeout_is_failed_and_killed() {
         static SHORT: InstallJob = InstallJob::new(&ChromeInstaller, Duration::from_millis(600));
-        with_fake_cli("echo '{\"event\":\"start\"}'\nsleep 60\n", || {
+        with_fake_cli("console.log(JSON.stringify({event:'start'}));\nawait new Promise(() => {});\n", || {
             SHORT.reset();
             SHORT.start();
             let pid = SHORT.pid().unwrap();

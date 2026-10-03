@@ -219,7 +219,9 @@ describe("save", () => {
       turnId: "turn-1",
     });
 
-    expect(webFiles(f)).toEqual([
+    // `readdirSync(recursive)` joins with the OS separator (backslashes on
+    // Windows); the saved/provenance paths below stay forward-slash.
+    expect(webFiles(f).map((entry) => entry.replaceAll("\\", "/"))).toEqual([
       "example.com",
       "example.com/fonts",
       "example.com/fonts/inter-var.woff2",

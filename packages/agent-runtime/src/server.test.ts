@@ -332,7 +332,11 @@ describe("runtime HTTP server", () => {
       expect(keyedText).not.toContain("sk-very-secret");
       expect(JSON.parse(keyedText)).toMatchObject({ jev: { apiKeyConfigured: true } });
       expect(await (await call("/v1/settings")).text()).not.toContain("sk-very-secret");
-      expect((await stat(join(settingsDir, "jev-credentials.json"))).mode & 0o777).toBe(0o600);
+      // Windows ACLs have no owner-only mode bits (stat reports 0666-style
+      // masks), so the privacy mode is asserted on POSIX only.
+      if (process.platform !== "win32") {
+        expect((await stat(join(settingsDir, "jev-credentials.json"))).mode & 0o777).toBe(0o600);
+      }
 
       // Jev is still disabled: the test reports what is missing instead of calling a model.
       expect(await responseObject(await call("/v1/settings/jev/test", "POST", {}))).toMatchObject({
@@ -421,7 +425,12 @@ describe("runtime HTTP server", () => {
       // The key is applied on top of OMP's credentials by the backend, which re-checked that provider live.
       expect(backend.refreshes).toEqual([{ provider: "anthropic" }]);
       expect((await settings.providerApiKeys()).get("anthropic")).toBe("sk-ant-very-secret");
-      expect((await stat(join(settingsDir, "provider-credentials.json"))).mode & 0o777).toBe(0o600);
+      // Windows ACLs have no owner-only mode bits; asserted on POSIX only.
+      if (process.platform !== "win32") {
+        expect((await stat(join(settingsDir, "provider-credentials.json"))).mode & 0o777).toBe(
+          0o600,
+        );
+      }
       for (const path of ["/v1/providers", "/v1/settings", "/v1/models"])
         expect(await (await call(path)).text()).not.toContain("sk-ant-very-secret");
 

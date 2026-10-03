@@ -12,7 +12,7 @@
 
 import net from "node:net";
 import http from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import type { BrowserGpuMode } from "../browser/gpuPolicy.js";
@@ -21,7 +21,6 @@ const execFileAsync = promisify(execFile);
 
 /** Max ports to scan before giving up. */
 const MAX_PORT_SCAN = 100;
-
 /** Localhost HTTP probe timeout — HyperFrames responds in <1ms, so 300ms is generous. */
 const PROBE_TIMEOUT_MS = 300;
 
@@ -194,13 +193,14 @@ export function detectHyperframesServer(
 // ── PID detection ──────────────────────────────────────────────────────────
 
 /**
- * Get the PID of the process listening on a port (macOS/Linux only).
- * Returns null on Windows or if detection fails.
- */
-/**
  * The PID the OS says is listening on `port`, or null when it cannot be
  * determined. This is the only trustworthy answer: a config response is
  * whatever the process on the other end chose to say.
+ *
+ * On Windows the lookup goes through `netstat -ano` (no `lsof` there); the
+ * child is spawned hidden so a GUI-launched preview never flashes a console.
+ * Verified on this machine against a live listener (loopback IPv4, IPv6 and
+ * dual-stack rows all parse to the owning pid).
  */
 async function getProcessOnPort(port: number): Promise<string | null> {
   if (process.platform === "win32") return windowsListenerPid(port);
@@ -217,7 +217,11 @@ async function getProcessOnPort(port: number): Promise<string | null> {
 
 async function windowsListenerPid(port: number): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync("netstat", ["-ano", "-p", "tcp"], { timeout: 4000 });
+    const { stdout } = await execFileAsync("netstat", ["-ano", "-p", "tcp"], {
+      timeout: 4000,
+      // A GUI-launched CLI has no console; without this the lookup flashes one.
+      windowsHide: true,
+    });
     for (const line of stdout.split(/\r?\n/)) {
       const columns = line.trim().split(/\s+/);
       if (columns.length < 5 || columns[3] !== "LISTENING") continue;
@@ -400,7 +404,18 @@ export async function killActiveServers(
       continue;
     }
     try {
-      process.kill(parseInt(server.pid, 10), "SIGTERM");
+      if (process.platform === "win32") {
+        // `process.kill` only ends the direct child on Windows; take the
+        // whole preview tree (server, Vite/Chrome descendants) with taskkill.
+        const result = execFileSync("taskkill", ["/PID", server.pid, "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+          timeout: 10_000,
+        });
+        void result;
+      } else {
+        process.kill(parseInt(server.pid, 10), "SIGTERM");
+      }
       killed++;
     } catch {
       // Process may have already exited

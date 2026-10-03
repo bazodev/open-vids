@@ -32,7 +32,13 @@ export async function claimIntake(projectDir: string): Promise<IntakeClaim> {
     let raw: unknown;
     try {
       raw = JSON.parse(await readFile(claimed, "utf-8"));
-    } catch {
+    } catch (error) {
+      // Windows renames eagerly: two claims racing the same file can both win
+      // their own rename (MoveFile moves, it never fails EEXIST), and the
+      // loser's private name is then consumed by the winner's rename, so the
+      // loser's read lands on ENOENT. That is a lost race, not a corrupt
+      // file — report "none" so the caller retries/waits like a second tab.
+      if (isMissing(error)) return { status: "none" };
       return { status: "invalid", message: "The project's intake file is not valid JSON." };
     }
     const parsed = parseAgentIntake(raw);

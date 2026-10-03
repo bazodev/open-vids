@@ -40,6 +40,11 @@
 //!   first-run System check and the Chrome installer (`home_system`).
 //! - `GET /api/update/status`, `POST /api/update/check`, `POST /api/update/install`
 //!   — the in-app update (`home_update`, `updater`).
+//! - `GET /api/menu/about` — the About sheet strings (name, version, site;
+//!   the same values the native About dialog shows).
+//! - `POST /api/menu/:action` — one title-bar app menu action through the
+//!   shared `menu_action` (`lib.rs`), for pages with no Tauri IPC. Only the
+//!   `MENU_ACTIONS` ids run; anything else 404s.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -91,6 +96,12 @@ pub struct HomeInner {
     /// Id of the project currently loaded in the Studio window, if any.
     /// Set when an open completes, cleared by Show All Projects.
     pub current_id: Option<String>,
+    /// What `menu_post_from_studio` compares the request `Origin` against:
+    /// the Studio sidecar origin the window currently shows, if any. Set by
+    /// lib.rs whenever it navigates to (or away from) a project, so Studio's
+    /// token-less menu posts only pass while they come from the live Studio
+    /// server. Never used for routing or navigation decisions.
+    pub studio_origin: Option<String>,
     /// Skip the launch intro on the next page load: the window is coming
     /// back from a project, or a project is opening at launch.
     pub skip_intro: bool,
@@ -110,6 +121,7 @@ impl HomeInner {
             open_phase: OpenPhase::Idle,
             opener: None,
             current_id: None,
+            studio_origin: None,
             skip_intro: false,
             prefs_listener: None,
             pending_onboarding: false,
@@ -135,11 +147,12 @@ pub fn serve_one(mut stream: TcpStream, state: &Arc<Mutex<HomeInner>>, token: &s
         respond(&mut stream, 400, "text/plain", b"bad request");
         return;
     };
-    if !home_auth::origin_allowed(&head, port) {
+    if !home_auth::origin_allowed(&head, port) && !menu_post_from_studio(&head, state, port) {
         respond(&mut stream, 403, "text/plain", b"foreign origin");
         return;
     }
     if home_auth::requires_token(&head.method, &head.path)
+        && !menu_post_from_studio(&head, state, port)
         && !HomeToken::matches(&HomeToken::from_value(token), head.header(TOKEN_HEADER))
     {
         respond(&mut stream, 403, "text/plain", b"bad token");
@@ -227,6 +240,8 @@ fn route(
         ("GET", p) if p.starts_with("/locales/") => serve_locale(s, &p["/locales/".len()..]),
         ("GET", p) if p.starts_with("/thumb/") => serve_thumb(s, state, p),
         ("GET", "/api/recents") => home_api::serve_recents(s, state),
+        // Token-free like the pages and assets: plain `fetch` from the page, no secret to leak.
+        ("GET", "/api/menu/about") => serve_menu_about(s),
         ("GET", "/api/open-state") => serve_open_state(s, state),
         ("GET", "/api/locations") => home_api::serve_locations(s, state),
         ("GET", "/api/preferences") => home_api::serve_prefs(s),
@@ -280,8 +295,94 @@ fn route(
         ("POST", "/api/files/dropped") => home_api::handle_dropped(s, body),
         ("POST", "/api/start/name") => home_api::handle_start_name(s, state, body),
         ("POST", "/api/start") => home_api::handle_start(s, state, body),
+        (_, p) if p.starts_with("/api/menu/") => handle_menu_action(s, &method, p),
         _ => respond(s, 404, "text/plain", b"not found"),
     }
+}
+
+/// Run one title-bar app menu action through the same `menu_action` the
+/// hidden native menu uses, so the two cannot drift apart. `POST` only
+/// (a GET must never quit the app); unknown actions 404 so a stale page
+/// cannot trigger something new.
+fn handle_menu_action(stream: &mut TcpStream, method: &str, path: &str) {
+    let action = path.trim_start_matches("/api/menu/");
+    if method != "POST"
+        || action.is_empty()
+        || action.contains('/')
+        || !super::MENU_ACTIONS.contains(&action)
+    {
+        respond(stream, 404, "text/plain", b"not found");
+        return;
+    }
+    match super::menu_app() {
+        Some(app) => {
+            super::menu_action(&app, action);
+            respond(stream, 200, "application/json", br#"{"ok":true}"#);
+        }
+        None => respond(stream, 503, "text/plain", b"app not ready"),
+    }
+}
+
+/// A `POST /api/menu/:action` from Studio's own origin (the project the
+/// window shows): the page cannot forward the home token by design — no
+/// Tauri IPC, no shared secret — so the request arrives without it. Only
+/// whitelisted actions pass, exactly the ones `menu_action` dispatches, and
+/// only with the Studio origin's `Origin`; everything else falls back to
+/// the token check. Same-origin `/api` traffic and foreign origins are
+/// unaffected.
+fn menu_post_from_studio(head: &Head, state: &Arc<Mutex<HomeInner>>, port: u16) -> bool {
+    if !head.method.eq_ignore_ascii_case("POST") {
+        return false;
+    }
+    let Some(action) = head.path.strip_prefix("/api/menu/") else {
+        return false;
+    };
+    if action.is_empty() || action.contains('/') || !super::MENU_ACTIONS.contains(&action) {
+        return false;
+    }
+    let origin = head.header("origin").map(str::trim).unwrap_or_default().to_lowercase();
+    if origin.is_empty() {
+        return false;
+    }
+    let studio_origins = studio_origins_for(state);
+    if !studio_origins.iter().any(|o| o == &origin) {
+        return false;
+    }
+    home_auth::origin_allowed_studio_origin(&origin, port)
+}
+
+/// The `Origin` values Studio may currently send: the live sidecar origin
+/// plus the `localhost` spelling of the same port, so the check survives the
+/// host alias the browser normalises to.
+fn studio_origins_for(state: &Arc<Mutex<HomeInner>>) -> Vec<String> {
+    let Some(origin) = state.lock().ok().and_then(|inner| inner.studio_origin.clone()) else {
+        return Vec::new();
+    };
+    let mut origins = vec![origin.to_lowercase()];
+    if let Some(rest) = origins[0].strip_prefix("http://127.0.0.1:") {
+        origins.push(format!("http://localhost:{rest}"));
+    } else if let Some(rest) = origins[0].strip_prefix("http://localhost:") {
+        origins.push(format!("http://127.0.0.1:{rest}"));
+    }
+    origins
+}
+
+/// What the pages show in their About sheet: the same name, version and site
+/// the native About dialog shows (`AboutMetadata` in `build_menu`), read from
+/// one place instead of two. GET is safe here: it only reads strings.
+fn serve_menu_about(stream: &mut TcpStream) {
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({
+            "name": "OpenVids",
+            "version": env!("CARGO_PKG_VERSION"),
+            "website": "https://openvids.ai",
+            "websiteLabel": "openvids.ai",
+            "comment": super::i18n::t("menu.app.aboutComment"),
+            "credits": super::i18n::t("menu.app.aboutCredits"),
+        }),
+    );
 }
 
 /// The page, with the token and the boot state (intro flag + preferences)
@@ -304,6 +405,7 @@ fn serve_page(stream: &mut TcpStream, state: &Arc<Mutex<HomeInner>>, token: &str
         "prefs": prefs,
         "locales": boot_locales(&prefs),
         "version": env!("CARGO_PKG_VERSION"),
+        "frame": super::window_frame(),
     });
     // `<` cannot close the inline script: JSON-escape it.
     let boot = boot.to_string().replace('<', "\\u003c");

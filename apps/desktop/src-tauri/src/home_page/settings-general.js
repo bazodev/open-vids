@@ -368,9 +368,9 @@
             ),
           ) +
           row(
-            te("settings.general.confirmTrash"),
+            esc(OV.pt("settings.general.confirmTrash")),
             null,
-            sw(prefs.confirmTrash, "confirm-trash", tr("settings.general.confirmTrash")),
+            sw(prefs.confirmTrash, "confirm-trash", esc(OV.pt("settings.general.confirmTrash"))),
           ),
       ) +
       updatesGroup(prefs)

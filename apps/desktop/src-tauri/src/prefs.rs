@@ -24,14 +24,42 @@ pub const DENSITIES: [&str; 2] = ["default", "compact"];
 pub const FPS_CHOICES: [u64; 4] = [24, 25, 30, 60];
 const MAX_SIZE: u64 = 8192;
 
-/// The defaults, i.e. what a missing file means.
-pub fn defaults() -> Value {
+/// The default New Projects folder: `~/Documents/OpenVids` on Windows,
+/// `~/Movies/OpenVids` elsewhere.
+pub fn default_project_location() -> &'static str {
+    default_project_location_for(cfg!(windows))
+}
+
+fn default_project_location_for(windows: bool) -> &'static str {
+    if windows {
+        "~/Documents/OpenVids"
+    } else {
+        "~/Movies/OpenVids"
+    }
+}
+
+fn migrate_legacy_location(location: &str, windows: bool, home: &Path) -> Option<String> {
+    if !windows {
+        return None;
+    }
+    let normalized = location.replace('\\', "/").to_lowercase();
+    let legacy_tilde = normalized == "~/movies/openvids";
+    let legacy_expanded = std::iter::once(home.to_path_buf())
+        .map(|path| path.join("Movies").join("OpenVids"))
+        .any(|path| path.to_string_lossy().replace('\\', "/").to_lowercase() == normalized);
+    (legacy_tilde || legacy_expanded).then(|| "~/Documents/OpenVids".to_string())
+}
+fn is_windows() -> bool {
+    cfg!(windows)
+}
+
+fn defaults_for(windows: bool) -> Value {
     json!({
         "version": 1,
         "theme": "system",
         "language": "system",
         "newProject": {
-            "location": "~/Movies/OpenVids",
+            "location": default_project_location_for(windows),
             "openIn": "media",
             "width": 1920,
             "height": 1080,
@@ -58,11 +86,12 @@ pub fn prefs_path() -> PathBuf {
     app_dir().join("preferences.json")
 }
 
+/// The user's home directory, resolved exactly like Node's `os.homedir()`
+/// (see `platform::home_dir`): `USERPROFILE` on Windows — Node ignores `HOME`
+/// there, so `~/.openvids` (preferences, the Asset Search policy) lands in
+/// the same place on both sides — `$HOME` on Unix.
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
+    super::platform::home_dir()
 }
 
 /// `~` and `~/…` → the user's home directory; everything else unchanged.
@@ -98,7 +127,17 @@ fn read_raw(path: &Path) -> Value {
 /// The effective preferences: the stored document with every known key
 /// validated (invalid or missing → default), unknown keys kept.
 pub fn load(path: &Path) -> Value {
-    normalize(read_raw(path))
+    load_for(path, is_windows(), &home_dir())
+}
+
+fn load_for(path: &Path, windows: bool, home: &Path) -> Value {
+    let mut stored = read_raw(path);
+    let migrated = migrate_stored_location(&mut stored, windows, home);
+    let effective = normalize_for(stored, windows);
+    if migrated {
+        let _ = write_atomic(path, &effective);
+    }
+    effective
 }
 
 /// Deep-merge `patch` into the stored document, validate, write atomically and
@@ -111,8 +150,9 @@ pub fn update(path: &Path, patch: &Value) -> std::io::Result<Value> {
         ));
     }
     let mut stored = read_raw(path);
+    migrate_stored_location(&mut stored, is_windows(), &home_dir());
     merge(&mut stored, patch);
-    let effective = normalize(stored);
+    let effective = normalize_for(stored, is_windows());
     write_atomic(path, &effective)?;
     Ok(effective)
 }
@@ -135,12 +175,23 @@ pub fn merge(target: &mut Value, patch: &Value) {
     }
 }
 
-fn normalize(stored: Value) -> Value {
+fn migrate_stored_location(stored: &mut Value, windows: bool, home: &Path) -> bool {
+    let Some(location) = stored["newProject"]["location"].as_str() else {
+        return false;
+    };
+    let Some(migrated) = migrate_legacy_location(location, windows, home) else {
+        return false;
+    };
+    stored["newProject"]["location"] = json!(migrated);
+    true
+}
+
+fn normalize_for(stored: Value, windows: bool) -> Value {
     let mut out = match stored {
         Value::Object(map) => map,
         _ => Map::new(),
     };
-    let base = defaults();
+    let base = defaults_for(windows);
     out.insert("version".into(), json!(1));
     let theme = pick_str(out.get("theme"), &THEMES, "system");
     out.insert("theme".into(), json!(theme));
@@ -203,7 +254,12 @@ fn normalize(stored: Value) -> Value {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| np_base["location"].as_str().unwrap_or("~").to_string());
+        .unwrap_or_else(|| {
+            np_base["location"]
+                .as_str()
+                .unwrap_or(default_project_location_for(windows))
+                .to_string()
+        });
     np.insert("location".into(), json!(location));
     let open_in = pick_str(np.get("openIn"), &WORKSPACES, "media");
     np.insert("openIn".into(), json!(open_in));
@@ -274,8 +330,12 @@ pub struct NewProjectPrefs {
 
 pub fn new_project(prefs: &Value) -> NewProjectPrefs {
     let np = &prefs["newProject"];
+    let raw_location = np["location"]
+        .as_str()
+        .unwrap_or(default_project_location());
+    let migrated_location = migrate_legacy_location(raw_location, is_windows(), &home_dir());
     NewProjectPrefs {
-        location: expand_tilde(np["location"].as_str().unwrap_or("~/Movies/OpenVids")),
+        location: expand_tilde(migrated_location.as_deref().unwrap_or(raw_location)),
         open_in: np["openIn"].as_str().unwrap_or("media").to_string(),
         width: np["width"].as_u64().unwrap_or(1920) as u32,
         height: np["height"].as_u64().unwrap_or(1080) as u32,
@@ -319,7 +379,8 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("openvids-prefs-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("openvids-prefs-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("preferences.json")
@@ -328,7 +389,7 @@ mod tests {
     #[test]
     fn a_missing_file_reads_as_the_defaults() {
         let path = tmp("missing");
-        assert_eq!(load(&path), defaults());
+        assert_eq!(load(&path), defaults_for(is_windows()));
     }
 
     #[test]
@@ -353,7 +414,57 @@ mod tests {
         assert_eq!(prefs["newProject"]["height"], 1920);
         assert_eq!(prefs["newProject"]["openIn"], "story");
         assert_eq!(prefs["newProject"]["extra"], true);
-        assert_eq!(prefs["newProject"]["location"], "~/Movies/OpenVids");
+        assert_eq!(prefs["newProject"]["location"], default_project_location());
+    }
+
+    #[test]
+    fn platform_defaults_and_legacy_location_migration_are_explicit() {
+        assert_eq!(default_project_location_for(true), "~/Documents/OpenVids");
+        assert_eq!(
+            defaults_for(true)["newProject"]["location"],
+            "~/Documents/OpenVids"
+        );
+        assert_eq!(default_project_location_for(false), "~/Movies/OpenVids");
+        assert_eq!(
+            defaults_for(false)["newProject"]["location"],
+            "~/Movies/OpenVids"
+        );
+
+        let home = Path::new(r"C:\Users\Alice");
+        for legacy in [
+            "~/Movies/OpenVids",
+            r"~\Movies\OpenVids",
+            r"c:\users\alice\movies\openvids",
+            "C:/Users/Alice/Movies/OpenVids",
+        ] {
+            assert_eq!(
+                migrate_legacy_location(legacy, true, home).as_deref(),
+                Some("~/Documents/OpenVids")
+            );
+            assert_eq!(migrate_legacy_location(legacy, false, home), None);
+        }
+        assert_eq!(migrate_legacy_location(r"D:\Work", true, home), None);
+        assert_eq!(
+            migrate_legacy_location("~/Videos/OpenVids", true, home),
+            None
+        );
+        let path = tmp("legacy-migration");
+        std::fs::write(&path, br#"{"newProject":{"location":"~/Movies/OpenVids"}}"#).unwrap();
+        let migrated = load_for(&path, true, home);
+        assert_eq!(migrated["newProject"]["location"], "~/Documents/OpenVids");
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["newProject"]["location"], "~/Documents/OpenVids");
+
+        std::fs::write(&path, br#"{"newProject":{"location":"D:\\Work"}}"#).unwrap();
+        assert_eq!(
+            load_for(&path, true, home)["newProject"]["location"],
+            r"D:\Work"
+        );
+        std::fs::write(&path, br#"{"newProject":{"location":"~/Movies/OpenVids"}}"#).unwrap();
+        assert_eq!(
+            load_for(&path, false, home)["newProject"]["location"],
+            "~/Movies/OpenVids"
+        );
     }
 
     #[test]
@@ -373,7 +484,13 @@ mod tests {
         assert_eq!(load(&path), next);
         let leftovers = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
-            .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            })
             .count();
         assert_eq!(leftovers, 0);
     }
@@ -382,7 +499,11 @@ mod tests {
     fn density_and_the_update_choice_are_stored_and_merged() {
         let path = tmp("density");
         std::fs::write(&path, br#"{"updates":{"channel":"beta"}}"#).unwrap();
-        let next = update(&path, &json!({"density":"compact","updates":{"autoCheck":false}})).unwrap();
+        let next = update(
+            &path,
+            &json!({"density":"compact","updates":{"autoCheck":false}}),
+        )
+        .unwrap();
         assert_eq!(next["density"], "compact");
         assert_eq!(next["updates"]["autoCheck"], false);
         assert_eq!(next["updates"]["channel"], "beta");
@@ -454,7 +575,11 @@ mod tests {
     fn onboarding_defaults_to_not_completed_and_keeps_unknown_keys() {
         let path = tmp("onboarding");
         assert_eq!(load(&path)["onboarding"], json!({"completedAt": null}));
-        let done = update(&path, &json!({"onboarding": {"completedAt": 1790000000000u64}})).unwrap();
+        let done = update(
+            &path,
+            &json!({"onboarding": {"completedAt": 1790000000000u64}}),
+        )
+        .unwrap();
         assert_eq!(done["onboarding"]["completedAt"], 1790000000000u64);
         // Unknown keys inside the group survive; a later patch that leaves
         // completedAt out keeps it.
@@ -468,8 +593,16 @@ mod tests {
         assert_eq!(next["onboarding"]["step"], "models");
         // Invalid values read as not completed.
         for bad in [r#""yes""#, "true", "0", "-5", "1.5", "[]"] {
-            std::fs::write(&path, format!(r#"{{"onboarding":{{"completedAt":{bad}}}}}"#)).unwrap();
-            assert_eq!(load(&path)["onboarding"]["completedAt"], Value::Null, "{bad}");
+            std::fs::write(
+                &path,
+                format!(r#"{{"onboarding":{{"completedAt":{bad}}}}}"#),
+            )
+            .unwrap();
+            assert_eq!(
+                load(&path)["onboarding"]["completedAt"],
+                Value::Null,
+                "{bad}"
+            );
         }
         std::fs::write(&path, br#"{"onboarding":"done"}"#).unwrap();
         assert_eq!(load(&path)["onboarding"], json!({"completedAt": null}));
@@ -488,11 +621,35 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn tilde_round_trips() {
         let home = home_dir();
-        assert_eq!(expand_tilde("~/Movies/OpenVids"), home.join("Movies/OpenVids"));
+        assert_eq!(
+            expand_tilde("~/Movies/OpenVids"),
+            home.join("Movies/OpenVids")
+        );
         assert_eq!(expand_tilde("/abs"), PathBuf::from("/abs"));
         assert_eq!(abbreviate_home(&home.join("Movies/X")), "~/Movies/X");
-        assert_eq!(abbreviate_home(Path::new("/Volumes/SSD/X")), "/Volumes/SSD/X");
+        assert_eq!(
+            abbreviate_home(Path::new("/Volumes/SSD/X")),
+            "/Volumes/SSD/X"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn tilde_round_trips() {
+        let home = home_dir();
+        assert_eq!(
+            expand_tilde("~/Movies/OpenVids"),
+            home.join("Movies/OpenVids")
+        );
+        assert_eq!(expand_tilde("~"), home);
+        assert_eq!(expand_tilde(r"C:\abs"), PathBuf::from(r"C:\abs"));
+        // A Unix-style absolute path is not absolute on Windows: it stays untouched.
+        assert_eq!(expand_tilde("/abs"), PathBuf::from("/abs"));
+        assert_eq!(abbreviate_home(&home.join("Movies/X")), "~/Movies/X");
+        assert_eq!(abbreviate_home(&home), "~");
+        assert_eq!(abbreviate_home(Path::new(r"C:\Windows")), r"C:\Windows");
     }
 }

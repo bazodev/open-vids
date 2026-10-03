@@ -1,7 +1,6 @@
 // @vitest-environment node
 import {
   appendFileSync,
-  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -20,6 +19,7 @@ import type { ResolvedProject } from "../types.js";
 import { isAnalysisFailure } from "./errors.js";
 import { AnalysisService } from "./service.js";
 import { AnalysisStore } from "./store.js";
+import { writeBrokenExe, writeHangExe } from "../helpers/fakeFfmpeg.js";
 import {
   addClip,
   createAnalysisProject,
@@ -178,43 +178,55 @@ describe.skipIf(!hasFfmpeg)("analysis of a real clip", () => {
     ]);
   });
 
+  // The Windows stand-in is a ~86 MB compiled exe whose first spawn takes
+  // ~1 s cold, so this gets a longer budget than the 5 s default.
   it("kills the ffmpeg child when a job is cancelled", async () => {
     const test = createAnalysisProject();
     projects.push(test);
     addClip(test, clip, SOURCE);
     const pidFile = join(test.root, "pid");
-    const fake = join(test.root, "fake-ffmpeg.sh");
-    writeFileSync(fake, `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 60\n`);
-    chmodSync(fake, 0o755);
-    const service = new AnalysisService(test.adapter, { ffmpegPath: fake });
-    const project = test.project;
+    // A `.sh` stand-in cannot exec on Windows (`spawn EFTYPE`), so the
+    // stand-in is a tiny compiled exe there (see helpers/fakeFfmpeg.ts).
+    // It lives outside the project dir: Windows locks a running exe's own
+    // image file, which would break the project's recursive cleanup.
+    const exeDir = mkdtempSync(join(tmpdir(), "openvids-fake-ffmpeg-"));
+    const fake = await writeHangExe(exeDir, pidFile);
+    try {
+      const service = new AnalysisService(test.adapter, { ffmpegPath: fake });
+      const project = test.project;
 
-    const job = await service.startJob(project, { source: SOURCE, stages: ["silence"] });
-    await waitFor(
-      () => existsSync(pidFile) && readFileSync(pidFile, "utf-8").trim() !== "",
-      "ffmpeg to start",
-    );
-    const pid = Number(readFileSync(pidFile, "utf-8"));
-    expect(() => process.kill(pid, 0)).not.toThrow();
+      const job = await service.startJob(project, { source: SOURCE, stages: ["silence"] });
+      await waitFor(
+        () => existsSync(pidFile) && readFileSync(pidFile, "utf-8").trim() !== "",
+        "ffmpeg to start",
+      );
+      const pid = Number(readFileSync(pidFile, "utf-8"));
+      expect(() => process.kill(pid, 0)).not.toThrow();
 
-    expect((await service.cancelJob(project, job.id))?.status).toBe("cancelled");
-    await waitFor(() => {
+      expect((await service.cancelJob(project, job.id))?.status).toBe("cancelled");
+      await waitFor(() => {
+        try {
+          process.kill(pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      }, "the ffmpeg process to be gone");
+    } finally {
+      // The killed exe's image lock releases asynchronously; best effort.
       try {
-        process.kill(pid, 0);
-        return false;
+        rmSync(exeDir, { recursive: true, force: true });
       } catch {
-        return true;
+        // Temp dir reclaimed by the OS; never fail the test on cleanup.
       }
-    }, "the ffmpeg process to be gone");
-  });
+    }
+  }, 30_000);
 
   it("fails one stage without losing the others: a broken ffmpeg fails silence and keeps the transcript", async () => {
     const test = createAnalysisProject();
     projects.push(test);
     addClip(test, clip, SOURCE);
-    const fake = join(test.root, "broken-ffmpeg.sh");
-    writeFileSync(fake, `#!/bin/sh\necho "boom" >&2\nexit 3\n`);
-    chmodSync(fake, 0o755);
+    const fake = await writeBrokenExe(test.root);
     const service = new AnalysisService(test.adapter, { ffmpegPath: fake });
 
     const job = await settle(

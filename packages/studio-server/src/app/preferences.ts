@@ -93,13 +93,39 @@ export interface AppPreferences {
   onboarding: OnboardingPreferences;
 }
 
-export function defaultAppPreferences(): AppPreferences {
+/** Windows' Documents-based default; other platforms retain their Movies default. */
+export function defaultProjectLocation(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "~/Documents/OpenVids" : "~/Movies/OpenVids";
+}
+
+/** Maps only the previous Windows default to the current Windows default. */
+export function migrateLegacyProjectLocation(
+  location: string,
+  platform: NodeJS.Platform,
+  home: string,
+): string | undefined {
+  if (platform !== "win32") return undefined;
+  const normalize = (value: string) => value.replaceAll("\\", "/").toLowerCase();
+  const normalized = normalize(location);
+  const expanded = normalize(join(home, "Movies", "OpenVids"));
+  return normalized === "~/movies/openvids" || normalized === expanded
+    ? "~/Documents/OpenVids"
+    : undefined;
+}
+
+/**
+ * The default New Projects folder is `~/Documents/OpenVids` on Windows and
+ * `~/Movies/OpenVids` elsewhere.
+ */
+export function defaultAppPreferences(
+  platform: NodeJS.Platform = process.platform,
+): AppPreferences {
   return {
     version: 1,
     theme: "system",
     language: "system",
     newProject: {
-      location: "~/Movies/OpenVids",
+      location: defaultProjectLocation(platform),
       openIn: "media",
       width: 1920,
       height: 1080,
@@ -150,17 +176,35 @@ const isTimestamp = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const isFrameSize = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_FRAME_SIZE;
-const isLocation = (value: unknown): value is string =>
-  typeof value === "string" &&
-  value.trim().length > 0 &&
-  value.length <= MAX_LOCATION_LENGTH &&
-  (value.trim().startsWith("/") || value.trim().startsWith("~"));
+const isWindowsAbsolute = (value: string): boolean =>
+  /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+const isLocation = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || value.length > MAX_LOCATION_LENGTH) return false;
+  // POSIX absolute (`/...`, `~...`) everywhere; drive-letter (`C:\...`, `C:/...`),
+  // UNC (`\\server\share`) and tilde-backslash (`~\...`) additionally on Windows.
+  // This is a shape check only — the desktop shell resolves the path.
+  if (trimmed.startsWith("/") || trimmed.startsWith("~")) return true;
+  if (process.platform !== "win32") return false;
+  return isWindowsAbsolute(trimmed) || /^[A-Za-z]:$/.test(trimmed);
+};
 
+function migrateStoredLocation(stored: Document, platform: NodeJS.Platform, home: string): boolean {
+  if (!isRecord(stored.newProject) || typeof stored.newProject.location !== "string") return false;
+  const location = migrateLegacyProjectLocation(stored.newProject.location, platform, home);
+  if (!location) return false;
+  stored.newProject.location = location;
+  return true;
+}
 type Document = Record<string, unknown>;
 
 /** The stored document with every known key validated (invalid or missing → default), unknown keys kept. */
-function normalize(stored: Document): Document & AppPreferences {
-  const base = defaultAppPreferences();
+function normalize(
+  stored: Document,
+  platform: NodeJS.Platform = process.platform,
+): Document & AppPreferences {
+  const base = defaultAppPreferences(platform);
   const project = isRecord(stored.newProject) ? stored.newProject : {};
   const newProject: Document & NewProjectPreferences = {
     ...project,
@@ -336,13 +380,22 @@ export class AppPreferencesStore {
   }
 
   read(): Document & AppPreferences {
-    return normalize(this.readRaw());
+    const stored = this.readRaw();
+    if (migrateStoredLocation(stored, process.platform, homedir())) {
+      const migrated = normalize(stored);
+      mkdirSync(dirname(this.path), { recursive: true });
+      replaceFileAtomically(this.path, `${JSON.stringify(migrated, null, 2)}\n`, 0o644);
+      return migrated;
+    }
+    return normalize(stored);
   }
 
   /** Validates `patch`, deep-merges it into the stored document and writes the effective result atomically. */
   update(patch: unknown): Document & AppPreferences {
     const valid = validatePreferencesPatch(patch);
-    const next = normalize(merge(this.readRaw(), valid));
+    const stored = merge(this.readRaw(), valid);
+    migrateStoredLocation(stored, process.platform, homedir());
+    const next = normalize(stored);
     mkdirSync(dirname(this.path), { recursive: true });
     replaceFileAtomically(this.path, `${JSON.stringify(next, null, 2)}\n`, 0o644);
     return next;

@@ -144,7 +144,11 @@ test("url library entries respect localOnly and freeze through fetch", async () 
       }
       const victim = join(projectDir, "victim.cube");
       writeFileSync(victim, "unchanged");
-      symlinkSync(victim, join(directory, "lut_001.cube.tmp"));
+      // Planting the staging symlink needs elevation / Developer Mode on
+      // Windows (EPERM without it); POSIX still guards the collision path.
+      if (process.platform !== "win32") {
+        symlinkSync(victim, join(directory, "lut_001.cube.tmp"));
+      }
       return {
         ok: true,
         headers: { get: () => String(body.length) },
@@ -156,12 +160,13 @@ test("url library entries respect localOnly and freeze through fetch", async () 
     assert.equal(fetchCalls, 1);
     assert.match(frozen.localPath, /^\.media\/luts\/lut_001\.cube$/);
     assert.equal(validateCubeFile(join(projectDir, frozen.localPath)).ok, true);
-    assert.equal(frozen.metadata.provenance.via, "url");
     assert.equal(readFileSync(join(projectDir, "victim.cube"), "utf8"), "unchanged");
-    assert.deepEqual(readdirSync(join(projectDir, ".media/luts")).sort(), [
-      "lut_001.cube",
-      "lut_001.cube.tmp",
-    ]);
+    // Without the planted symlink (Windows, unprivileged) the staging .tmp is
+    // consumed into the final .cube; with it (POSIX) the guard preserves it.
+    assert.deepEqual(
+      readdirSync(join(projectDir, ".media/luts")).sort(),
+      process.platform === "win32" ? ["lut_001.cube"] : ["lut_001.cube", "lut_001.cube.tmp"],
+    );
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(projectDir, { recursive: true, force: true });

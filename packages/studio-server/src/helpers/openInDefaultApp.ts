@@ -4,12 +4,16 @@ import { once } from "node:events";
 /**
  * The platform's "open with the default application" command, as
  * `(command, args)`. macOS and Linux hand the path to a launcher that asks the
- * desktop for the file's default app; Windows goes through `cmd`'s `start`
- * (the empty argument is `start`'s window-title slot, not a path).
+ * desktop for the file's default app. Windows cannot go through `cmd`'s
+ * `start` here: `start` re-parses its tail itself, and neither a bare path
+ * nor an extra-quoted one survives both spaces and `&` (`"a&b"` truncates at
+ * the `&` — verified against this machine's `cmd.exe`), so a project or
+ * render whose name has either would open the wrong file. `explorer.exe`
+ * takes the file as one argv element instead (no shell), which both survive.
  */
 export function openerCommand(path: string): [string, string[]] {
   if (process.platform === "darwin") return ["/usr/bin/open", [path]];
-  if (process.platform === "win32") return ["cmd", ["/c", "start", "", path]];
+  if (process.platform === "win32") return ["explorer.exe", [path]];
   return ["xdg-open", [path]];
 }
 
@@ -28,7 +32,10 @@ const OPENER_TIMEOUT_MS = 10_000;
  */
 export async function openInDefaultApp(path: string): Promise<void> {
   const [command, args] = openerCommand(path);
-  const child = spawn(command, args, { stdio: "ignore" });
+  // GUI launchers (`explorer.exe`, `open`) reuse no console, so no window
+  // flashes; `windowsHide` is still set for the rare stub resolution.
+  // No-op on POSIX.
+  const child = spawn(command, args, { stdio: "ignore", windowsHide: true });
   const timer = setTimeout(() => child.kill(), OPENER_TIMEOUT_MS);
   timer.unref?.();
   try {

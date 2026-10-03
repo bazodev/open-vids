@@ -4,6 +4,7 @@ import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { useDockLayoutStore } from "../components/dock/dockLayoutStore";
 import { isTextFieldTarget, isTypingTarget } from "../utils/typingTarget";
+import { resolveModifierKey } from "../utils/keyMatch";
 import { studioStoryStore } from "../story/storyContext";
 import { isEditableTarget } from "../utils/timelineDiscovery";
 import { shouldIgnoreHistoryShortcut } from "../utils/studioHelpers";
@@ -22,7 +23,7 @@ export function handleUndoRedoKey(
   onUndo: () => void,
   onRedo: () => void,
 ): boolean {
-  const key = event.key.toLowerCase();
+  const key = resolveModifierKey(event);
   if (key === "z" && !event.shiftKey) {
     event.preventDefault();
     onUndo();

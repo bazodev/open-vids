@@ -1,9 +1,9 @@
 /* Settings → Models & Providers: the agent runtime's providers (GET /api/agent/providers, POST …/refresh) with
-   their models (GET …/providers/:id/models) and the API key OpenVids keeps per provider
-   (POST …/providers/:id/api-key {apiKey|null}). What is and isn't possible (see the settings contract):
-   keys typed here live in a private file on this Mac (~/.openvids/agent), not in the macOS Keychain and not in
-   OMP; there is no in-app sign-in (an expired OMP sign-in is renewed in OMP); only keys stored by OpenVids
-   (credentialSource "api-key") can be removed here. */
+     their models (GET …/providers/:id/models) and the API key OpenVids keeps per provider
+     (POST …/providers/:id/api-key {apiKey|null}). What is and isn't possible (see the settings contract):
+     keys typed here live in a private file in the user profile (~/.openvids/agent), not in the system keychain
+     or credential store and not in OMP; there is no in-app sign-in (an expired OMP sign-in is renewed in OMP);
+     only keys stored by OpenVids (credentialSource "api-key") can be removed here. */
 (function () {
   "use strict";
   const { ic, esc, api, S, ui, PAGES, CLICK, INPUT, ENTER, AGENTS, tr, msg, failMsg, text } = OVS;
@@ -186,7 +186,7 @@
         tr("settings.providers.connect"),
       )}</button></div>` +
       (err ? `<p class="st-field-err" id="err-${id}" role="alert">${esc(text(err))}</p>` : "") +
-      `<p class="st-foot">${esc(tr("settings.key.foot"))}</p>`
+      `<p class="st-foot">${esc(OV.pt("settings.key.foot"))}</p>`
     );
   }
   const disconnectLink = (p) =>
@@ -240,7 +240,7 @@
 
   /* Sign out of a sign-in made inside OpenVids (credentialSource "oauth"); it does not revoke anything at the provider. */
   const signOutBlock = (p) =>
-    `<p class="st-foot">${esc(tr("settings.providers.signedInFoot", { provider: p.name }))}</p><div><button type="button" class="link" data-act="signout" data-v="${esc(p.id)}" data-fk="signout:${esc(p.id)}">${esc(tr("settings.providers.signOut"))}</button></div>`;
+    `<p class="st-foot">${esc(OV.pt("settings.providers.signedInFoot", { provider: p.name }))}</p><div><button type="button" class="link" data-act="signout" data-v="${esc(p.id)}" data-fk="signout:${esc(p.id)}">${esc(tr("settings.providers.signOut"))}</button></div>`;
 
   function providerBody(p) {
     const si = OVS.signin;
@@ -253,9 +253,9 @@
         (p.credentialSource === "oauth"
           ? signOutBlock(p)
           : p.credentialSource === "api-key"
-            ? `<p class="st-foot">${esc(tr("settings.providers.keyStoredFoot"))}</p>${disconnectLink(p)}`
+            ? `<p class="st-foot">${esc(OV.pt("settings.providers.keyStoredFoot"))}</p>${disconnectLink(p)}`
             : p.keyless
-              ? `<p class="st-foot">${esc(tr("settings.providers.keylessFoot"))}</p>`
+              ? `<p class="st-foot">${esc(OV.pt("settings.providers.keylessFoot"))}</p>`
               : `<p class="st-foot">${esc(tr("settings.providers.ompFoot"))}</p>`);
     } else if (p.status === "error") {
       body +=

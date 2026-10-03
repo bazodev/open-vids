@@ -54,11 +54,15 @@ describe("replaceFileAtomically", () => {
     replaceFileAtomically(file, "new complete html", 0o640, operations);
 
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatch(new RegExp(`^write:${file}\\.\\d+\\.[0-9a-f-]+\\.tmp$`));
+    // `file` carries backslashes on Windows, which are regex escapes: quote
+    // it instead of interpolating it raw.
+    const quoted = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(events[0]).toMatch(new RegExp(`^write:${quoted}\\.\\d+\\.[0-9a-f-]+\\.tmp$`));
     const tempPath = events[0]!.slice("write:".length);
     expect(events[1]).toBe(`rename:${tempPath}:${file}`);
     expect(readFileSync(file, "utf-8")).toBe("new complete html");
-    expect(fs.statSync(file).mode & 0o777).toBe(0o640);
+    // Windows ACLs have no POSIX mode bits; asserted on POSIX only.
+    if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o640);
   });
 
   it("replaces an existing destination", () => {
@@ -119,7 +123,8 @@ describe("replaceFileAtomically", () => {
 
     expect(() => replaceFileAtomically(file, "new", 0o640, operations)).toThrow("publish failed");
     expect(tempPaths).toHaveLength(1);
-    expect(tempPaths[0]).toMatch(new RegExp(`^${file}\\.\\d+\\.[0-9a-f-]+\\.tmp$`));
+    const quotedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(tempPaths[0]).toMatch(new RegExp(`^${quotedFile}\\.\\d+\\.[0-9a-f-]+\\.tmp$`));
     expect(removed).toEqual(tempPaths);
   });
 });

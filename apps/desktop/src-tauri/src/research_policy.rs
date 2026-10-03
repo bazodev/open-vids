@@ -957,8 +957,13 @@ fn random_hex4() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Temp file in the same directory (mode 0600), then rename over the target;
-/// the directory is created with mode 0700.
+/// Temp file in the same directory (mode 0600 on Unix), then rename over the
+/// target; the directory is created with mode 0700 on Unix. On Windows the
+/// 0600/0700 bits do not exist: the file lives under `~/.openvids` in the user
+/// profile, which already inherits the profile ACL (readable by the user,
+/// SYSTEM and admins only), so no extra DACL is applied — the profile
+/// inheritance is the protection, and tightening it further would risk
+/// locking the user out of their own policy file.
 fn write_private_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));

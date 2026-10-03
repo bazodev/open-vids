@@ -205,9 +205,10 @@ describe("diarizationConfig", () => {
   });
 
   it("points segmentation and embedding at the pinned files in order", () => {
+    // join() yields OS-native separators, so build the expectation the same way.
     expect(diarizationConfig("/m")).toMatchObject({
-      segmentation: { pyannote: { model: "/m/pyannote-segmentation-3-0.onnx" } },
-      embedding: { model: "/m/nemo_en_titanet_small.onnx" },
+      segmentation: { pyannote: { model: join("/m", "pyannote-segmentation-3-0.onnx") } },
+      embedding: { model: join("/m", "nemo_en_titanet_small.onnx") },
     });
   });
 });

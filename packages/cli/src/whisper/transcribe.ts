@@ -21,6 +21,9 @@ function detectLanguage(whisperPath: string, modelPath: string, wavPath: string)
     encoding: "utf-8",
     timeout: 30_000,
     stdio: ["ignore", "pipe", "pipe"],
+    // A GUI-launched transcription has no console; without this the probe
+    // flashes one on Windows. No-op on POSIX.
+    windowsHide: true,
   });
   if (run.status !== 0) return null;
   // whisper.cpp logs the result on stderr, so stdout alone never carries it.
@@ -176,7 +179,7 @@ function getMediaDurationSeconds(filePath: string): number | null {
         "--",
         filePath,
       ],
-      { encoding: "utf-8", timeout: 10_000 },
+      { encoding: "utf-8", timeout: 10_000, windowsHide: true },
     );
     const durationSeconds = Number.parseFloat(raw.trim());
     return Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null;
@@ -307,6 +310,9 @@ function runFfmpeg(ffmpegPath: string, args: string[], output: string, timeout: 
       stdio: ["ignore", "ignore", "pipe"],
       maxBuffer: 64 * 1024 * 1024,
       timeout,
+      // A GUI-launched transcription has no console; without this the convert
+      // flashes one on Windows. No-op on POSIX.
+      windowsHide: true,
     });
   } catch (err) {
     rmSync(output, { force: true });
@@ -366,7 +372,7 @@ function isWav16kMono(filePath: string): boolean {
     const raw = execFileSync(
       ffprobePath,
       ["-v", "quiet", "-print_format", "json", "-show_streams", "--", filePath],
-      { encoding: "utf-8", timeout: 10_000 },
+      { encoding: "utf-8", timeout: 10_000, windowsHide: true },
     );
     const parsed: { streams?: AudioStream[] } = JSON.parse(raw);
     return isPcm16kMono(parsed.streams?.find((s) => s.codec_type === "audio"));
@@ -536,6 +542,9 @@ export async function transcribe(
     execFileSync(whisper.executablePath, whisperArgs, {
       stdio: "ignore",
       timeout: whisperTimeoutMs,
+      // A GUI-launched transcription has no console; without this the
+      // recognizer flashes one on Windows. No-op on POSIX.
+      windowsHide: true,
     });
   } catch (err) {
     // Surface the timeout knob when the child was killed by our own timeout —

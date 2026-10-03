@@ -45,7 +45,11 @@ const PARAKEET_INSTALL =
  *  working install on PATH. */
 function isRunnable(bin: string): boolean {
   try {
-    execFileSync(bin, ["--help"], { stdio: ["ignore", "ignore", "ignore"], timeout: 10000 });
+    execFileSync(bin, ["--help"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 10000,
+      windowsHide: true,
+    });
     return true;
   } catch {
     return false;
@@ -68,6 +72,7 @@ export function findParakeet(): string | undefined {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5000,
+      windowsHide: true,
     });
     const first = out
       .split(/\r?\n/)

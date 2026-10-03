@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "../../i18n";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { Kbd } from "../ui/Kbd";
+import { resolveShortcutKey } from "../../utils/platform";
 import { useDialogBehavior } from "../ui/useDialogBehavior";
 
 export function PromptPreviewModal({
@@ -96,7 +97,7 @@ export function PromptPreviewModal({
             <Trans
               i18nKey="shell.askAgent.copyShortcut"
               components={{
-                shortcut: <Kbd>{navigator.platform.includes("Mac") ? "⌘↵" : "Ctrl+↵"}</Kbd>,
+                shortcut: <Kbd>{resolveShortcutKey("⌘↵")}</Kbd>,
               }}
             />
           </span>

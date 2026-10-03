@@ -101,7 +101,21 @@ describe("JPEG timeline thumbnail route", () => {
     expect((await app.request(url.replace("/p/", "/unknown/"))).status).toBe(404);
     expect((await app.request(url.replace("photo.jpg", "..%2Foutside.jpg"))).status).toBe(404);
     await photo(join(outside, "private.jpg"));
-    await symlink(join(outside, "private.jpg"), join(dir, "link.jpg"));
+    try {
+      await symlink(join(outside, "private.jpg"), join(dir, "link.jpg"));
+    } catch (error) {
+      // File symlinks need SeCreateSymbolicLinkPrivilege on Windows; the
+      // traversal assertions above already passed.
+      if (
+        process.platform === "win32" &&
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        ["EPERM", "EACCES", "ENOSYS"].includes(String(error.code))
+      )
+        return;
+      throw error;
+    }
     expect((await app.request(url.replace("photo.jpg", "link.jpg"))).status).toBe(404);
   });
   it("rejects other formats even if renamed to JPEG", async () => {

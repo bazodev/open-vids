@@ -178,8 +178,11 @@ function sourceLabel(source: "env" | "default"): string {
 }
 
 function commandExists(command: string): boolean {
+  // `which` does not exist on Windows; `where` is its equivalent. Without
+  // this every binary check reported "missing" on win32.
+  const probe = process.platform === "win32" ? "where" : "which";
   try {
-    execFileSync("which", [command], { stdio: "ignore", timeout: 5000 });
+    execFileSync(probe, [command], { stdio: "ignore", timeout: 5000, windowsHide: true });
     return true;
   } catch {
     return false;

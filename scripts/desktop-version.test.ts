@@ -9,7 +9,6 @@ import {
   rewriteCargoLockVersion,
   rewriteCargoTomlVersion,
   rewritePackageJsonVersion,
-  tauriConfSetsVersion,
 } from "./desktop-version.ts";
 
 const CARGO_TOML = `[package]
@@ -202,15 +201,29 @@ describe("checkVersionMirrors", () => {
   });
 });
 
-describe("tauriConfSetsVersion", () => {
-  it("detects a top-level version key", () => {
-    assert.equal(tauriConfSetsVersion("{}"), false);
-    assert.equal(tauriConfSetsVersion('{"bundle":{"version":"0.1.0"}}'), false);
-    assert.equal(tauriConfSetsVersion('{"version": "0.1.0"}'), true);
+describe("platform overlay versions", () => {
+  it("accepts overlays without a version", () => {
+    assert.deepEqual(
+      checkVersionMirrors({
+        ...SOURCES,
+        tauriWindowsConf: '{"bundle":{"targets":["nsis"]}}',
+        tauriMacosConf: '{"bundle":{"targets":["app","dmg"]}}',
+        tauriProdConf: '{"bundle":{"resources":{}}}',
+      }),
+      { version: "0.1.0", problems: [] },
+    );
   });
 
-  it("throws when the config is not a JSON object", () => {
-    assert.throws(() => tauriConfSetsVersion("[]"), /JSON object/);
-    assert.throws(() => tauriConfSetsVersion("not json"), SyntaxError);
+  it("flags a version in any overlay config", () => {
+    const withVersion = '{"version": "0.1.0"}';
+    for (const key of ["tauriWindowsConf", "tauriMacosConf", "tauriProdConf"] as const) {
+      const problems = checkVersionMirrors({ ...SOURCES, [key]: withVersion }).problems;
+      assert.equal(problems.length, 1);
+      assert.match(problems[0] ?? "", /remove "version"/);
+    }
+  });
+
+  it("treats missing overlays as no problem", () => {
+    assert.deepEqual(checkVersionMirrors(SOURCES), { version: "0.1.0", problems: [] });
   });
 });

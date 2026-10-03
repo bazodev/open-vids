@@ -127,7 +127,8 @@ describe("manifest io", () => {
 
   it("segmentDirFor nests under renders/.hf-segments", () => {
     dir = mkdtempSync(join(tmpdir(), "hf-seg-"));
-    expect(segmentDirFor("/p/renders", "abc")).toBe("/p/renders/.hf-segments/abc");
+    // join() normalizes separators per OS: "/" on POSIX, "\" on Windows.
+    expect(segmentDirFor("/p/renders", "abc")).toBe(join("/p/renders", ".hf-segments", "abc"));
   });
 });
 

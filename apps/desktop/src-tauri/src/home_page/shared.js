@@ -15,6 +15,12 @@
     paperclip: '<path d="m8 12.5 6.1-6.1a3.5 3.5 0 0 1 5 5l-8.4 8.4a5 5 0 0 1-7.1-7.1l8.5-8.5"/>',
     sliders:
       '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h9M17 18h3"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="18" r="2"/>',
+    /* The Settings gear: Phosphor "Gear" regular (8-tooth cog, 256-grid
+       scaled to this sprite's 24-grid), filled like every other Studio gear
+       (SystemIcons Settings) — one constant, swap in one line. The previous
+       custom outline drew hairlines at 14 px; the filled cog stays crisp at
+       14-16 px on the dark titlebar at 1x/1.75x/4x (contact sheet:
+       apps/desktop/tests/fixtures/gear-contact-sheet-1x.png). */
     settings:
       '<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 1 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 1 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V4a1.7 1.7 0 1 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 1 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
@@ -271,6 +277,30 @@
     });
   }
 
+  /* ---- Title-bar app menu (Windows custom frame): actions through the
+     shared `menu_action` (`POST /api/menu/:action`, token-gated), About
+     strings as a read (`GET /api/menu/about`, token-free). One caller so
+     the Projects page and Studio cannot drift: `act` never throws (a refused
+     request resolves false), `about` falls back to the app name + version
+     when the route is unreachable. The webview has no Tauri IPC by design,
+     so these are plain `fetch` — the only channel the capability leaves. ---- */
+  function menuAct(action) {
+    return api("/api/menu/" + action, {}).then(
+      function () {
+        return true;
+      },
+      function () {
+        return false;
+      },
+    );
+  }
+  function menuAbout() {
+    return fetch("/api/menu/about").then(function (res) {
+      return res.json().catch(function () {
+        return {};
+      });
+    });
+  }
   /* The text to show for a failure from the local server: the translation of its code (home.error.<code>, with
      the params the server sent), or its own English sentence when it has no code or the catalog has no key for
      it. Takes an Error from api(), or any {code, params, error|message} object (the open-state and install
@@ -284,7 +314,8 @@
           ? err.error
           : "";
     if (typeof err.code !== "string" || !err.code) return message;
-    const key = "home.error." + err.code;
+    /* Server codes name the Mac app (reveal_failed, trash_failed): Windows takes the .win text when it has one. */
+    const key = platformKey("home.error." + err.code);
     const params = err.params && typeof err.params === "object" ? err.params : undefined;
     const text = OVI18N.t(key, params);
     return text === key ? message : text;
@@ -304,8 +335,147 @@
       if (themePref === "system") applyTheme(themePref);
     });
 
-  /* ---- Density: Settings → Appearance → Density (Compact / Default). Set on :root so the Projects page and the
-     Settings window share the token rules in ov.css; the Settings window also mirrors it on its own #win. ---- */
+  /* ---- Window frame: which titlebar chrome to draw (Rust `window_frame()` via OV_BOOT).
+     "overlay" is macOS (traffic lights + 52 px spacer); "custom" is the Windows
+     frameless frame (page-drawn minimize / maximize / close on the right);
+     "system" is the Windows fallback (the OS draws its frame; no buttons).
+     frame() reads the boot value once (the window never changes frame for its
+     lifetime), defaulting to overlay so macOS output never changes. isCustomFrame()
+     is the one-line check the titlebars use. invoke() is the only Tauri IPC
+     this page may use: `window.__TAURI_INTERNALS__.invoke('plugin:window|…')`,
+     injected in every webview (remote loopback origins included) for exactly
+     the commands `capabilities/main.json` grants — nothing else is reachable.
+     Buttons call these directly (no async/await: errors just leave the state
+     as it was; the maximize poll re-reads on the next resize). ---- */
+  var bootFrame = null;
+  function frame() {
+    if (bootFrame) return bootFrame;
+    var boot = window.OV_BOOT;
+    if (!boot && window.parent !== window) {
+      try {
+        boot = window.parent.OV_BOOT;
+      } catch {
+        /* Cross-origin parent: retain the safe overlay default. */
+      }
+    }
+    boot = boot || {};
+    bootFrame =
+      boot.frame === "custom" || boot.frame === "system" || boot.frame === "overlay"
+        ? boot.frame
+        : "overlay";
+    return bootFrame;
+  }
+  function applyCaptionFrame(doc) {
+    if (frame() !== "custom") return;
+    var min = doc.querySelector(".tl.min");
+    var max = doc.querySelector(".tl.max");
+    var close = doc.querySelector(".tl-group .tl.close");
+    if (min) min.remove();
+    if (max) max.remove();
+    if (close) {
+      close.classList.remove("tl");
+      close.classList.add("win-btn");
+    }
+  }
+  function isCustomFrame() {
+    return frame() === "custom";
+  }
+  function invoke(cmd, args) {
+    try {
+      var internals = window.__TAURI_INTERNALS__;
+      if (!internals || typeof internals.invoke !== "function") return null;
+      return internals.invoke("plugin:window|" + cmd, Object.assign({ label: "main" }, args));
+    } catch {
+      return null;
+    }
+  }
+  /* ---- Platform: one place for Mac-vs-Windows labels, so catalog keys and keycaps read right on both.
+     isMacOs reads the UA (desktop webviews send a real one); resolution picks Mac wording (base key / ⌘ glyphs)
+     vs Windows wording (<key>.win / spelled-out modifiers). With no UA to read (tests), Mac wins, so Mac output
+     never changes. ---- */
+  function isMacOs(ua) {
+    var value =
+      typeof ua === "string" ? ua : typeof navigator !== "undefined" ? navigator.userAgent : "";
+    if (!value) return true;
+    return /Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(value) && !/Windows/i.test(value);
+  }
+  /* A Mac keycap (⇧⌘R, ⌘D, ⌘1, ⌘,) spelled for Windows (Ctrl+Shift+R, Ctrl+D, …); unchanged on Mac. */
+  function shortcutKey(key, mac) {
+    if (mac === undefined ? isMacOs() : mac) return key;
+    return String(key)
+      .replace(/⇧⌘/g, "Ctrl+Shift+")
+      .replace(/⌘⇧/g, "Ctrl+Shift+")
+      .replace(/⌘/g, "Ctrl+")
+      .replace(/⇧/g, "Shift+")
+      .replace(/⌥/g, "Alt+")
+      .replace(/⌃/g, "Ctrl+");
+  }
+  /* The catalog key to translate: the base key on macOS, its .win variant on Windows when the catalog has it
+     (probed through OVI18N.t, which answers the key itself when no language has it). */
+  function platformKey(key, mac) {
+    if (mac === undefined ? isMacOs() : mac) return key;
+    var win = key + ".win";
+    return OVI18N.t(win) !== win ? win : key;
+  }
+  /* Like OVI18N.t but platform-aware: Windows takes the .win variant when the catalog has it, else the base key. */
+  function pt(key, params, mac) {
+    return OVI18N.t(platformKey(key, mac), params);
+  }
+  /* Layout-independent chord matching, Windows only. With a non-Latin layout (Russian, Greek, ...) Ctrl+<key>
+     reports the localized character in e.key (e.g. Cyrillic es for Ctrl+C), so a plain `e.key === "c"` test
+     drops the keystroke. The physical position still arrives as e.code ("KeyC"), matched through CODE_TO_KEY —
+     but only on Windows (the desktop webview sends a UA to read) and only when e.key is not a visible Latin
+     character: Latin stays authoritative, so Dvorak/AZERTY users keep the letters they see. macOS and Linux
+     take the plain key comparison, byte-identical to before. `want` is a lowercase letter/digit/punctuation. */
+  var CODE_TO_KEY = {
+    KeyA: "a",
+    KeyB: "b",
+    KeyC: "c",
+    KeyD: "d",
+    KeyE: "e",
+    KeyF: "f",
+    KeyG: "g",
+    KeyH: "h",
+    KeyI: "i",
+    KeyJ: "j",
+    KeyK: "k",
+    KeyL: "l",
+    KeyM: "m",
+    KeyN: "n",
+    KeyO: "o",
+    KeyP: "p",
+    KeyQ: "q",
+    KeyR: "r",
+    KeyS: "s",
+    KeyT: "t",
+    KeyU: "u",
+    KeyV: "v",
+    KeyW: "w",
+    KeyX: "x",
+    KeyY: "y",
+    KeyZ: "z",
+    Digit0: "0",
+    Digit1: "1",
+    Digit2: "2",
+    Digit3: "3",
+    Digit4: "4",
+    Digit5: "5",
+    Digit6: "6",
+    Digit7: "7",
+    Digit8: "8",
+    Digit9: "9",
+    Comma: ",",
+    Period: ".",
+  };
+  function matchesKey(e, want, ua) {
+    if (!e) return false;
+    if (String(e.key || "").toLowerCase() === want) return true;
+    var value =
+      typeof ua === "string" ? ua : typeof navigator !== "undefined" ? navigator.userAgent : "";
+    if (!/Windows/i.test(value)) return false;
+    if (/^[\x20-\x7E]$/.test(String(e.key))) return false;
+    return CODE_TO_KEY[e.code] === want;
+  }
   let densityPref = "default";
   function applyDensity(pref) {
     if (pref === "compact" || pref === "default") densityPref = pref;
@@ -328,6 +498,8 @@
     formatClock: formatClock,
     esc: esc,
     api: api,
+    menuAct: menuAct,
+    menuAbout: menuAbout,
     describeError: describeError,
     applyTheme: applyTheme,
     themePref: function () {
@@ -337,5 +509,14 @@
     densityPref: function () {
       return densityPref;
     },
+    isMacOs: isMacOs,
+    shortcutKey: shortcutKey,
+    platformKey: platformKey,
+    pt: pt,
+    matchesKey: matchesKey,
+    frame: frame,
+    applyCaptionFrame: applyCaptionFrame,
+    isCustomFrame: isCustomFrame,
+    invoke: invoke,
   };
 })();

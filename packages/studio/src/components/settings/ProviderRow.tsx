@@ -16,6 +16,7 @@ import {
 } from "./ProviderSignIn";
 import { SettingsLink } from "./settingsLayout";
 import { agentName, modelKey } from "./providerStatus";
+import { platformKey } from "../../utils/platform";
 import { isRunningLogin } from "./useOAuthSignIns";
 
 /** What the row says about a provider, from the status the runtime reported. */
@@ -245,7 +246,7 @@ export function ProviderRow({
 }: ProviderRowProps) {
   const { t } = useTranslation();
   const look = describe(provider);
-  const keyStorageNote = t("settings.studio.pv.keyStorageNote");
+  const keyStorageNote = t(platformKey("settings.studio.pv.keyStorageNote"));
   const bodyId = useId();
   const ownKey = provider.credentialSource === "api-key";
   const setUp = provider.status === "not_configured";

@@ -93,12 +93,10 @@ function isUnchanged(filePath: string, expected: string): boolean {
  */
 export function stampFileHfIds(filePath: string): string | null {
   let fd: number | null = openNoFollow(filePath, constants.O_RDWR);
-  let writable = true;
-  if (fd === null) {
-    fd = openNoFollow(filePath, constants.O_RDONLY);
-    writable = false;
-  }
+  const writable = fd !== null;
+  fd ??= openNoFollow(filePath, constants.O_RDONLY);
   if (fd === null) return null;
+  let closed = false;
   try {
     if (!fstatSync(fd).isFile()) return null;
     const html = readFileSync(fd, "utf-8");
@@ -109,8 +107,11 @@ export function stampFileHfIds(filePath: string): string | null {
     const idsAfter = (normalized.match(/\bdata-hf-id=/g) ?? []).length;
     if (writable && idsAfter > idsBefore) {
       const mode = fstatSync(fd).mode;
+      // Windows refuses rename/unlink of a file with an open handle, so close
+      // before the atomic replace and re-check the bytes: a write that landed
+      // meanwhile is kept.
       closeSync(fd);
-      fd = null;
+      closed = true;
       if (isUnchanged(filePath, html)) replaceFileAtomically(filePath, normalized, mode);
     }
     return normalized;
@@ -118,6 +119,12 @@ export function stampFileHfIds(filePath: string): string | null {
     console.warn("[hyperframes] stampFileHfIds: failed to stamp ids:", err);
     return null;
   } finally {
-    if (fd !== null) closeSync(fd);
+    if (!closed) {
+      try {
+        closeSync(fd);
+      } catch {
+        // The descriptor is already gone.
+      }
+    }
   }
 }

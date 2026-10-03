@@ -71,7 +71,10 @@ pub fn is_valid_project_id(value: &str) -> bool {
 }
 
 pub fn validate(dir: &Path) -> Result<Project, ProjectError> {
-    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    // `canonicalize()` returns `\\?\`-prefixed paths on Windows; strip the
+    // prefix so stored dirs, recents dedup and Studio project ids stay stable
+    // and equal for the same folder.
+    let dir = super::platform::canonical_stable(dir);
     if !dir.is_dir() {
         return Err(ProjectError::NotADirectory(dir));
     }
@@ -90,8 +93,16 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(windows))]
     fn rejects_paths_that_are_not_directories() {
         let err = validate(Path::new("/definitely/not/here/openvids")).unwrap_err();
+        assert!(matches!(err, ProjectError::NotADirectory(_)));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn rejects_paths_that_are_not_directories() {
+        let err = validate(Path::new(r"C:\definitely\not\here\openvids")).unwrap_err();
         assert!(matches!(err, ProjectError::NotADirectory(_)));
     }
 
@@ -114,5 +125,16 @@ mod tests {
         for name in ["demo", "My Video", "v1.2_final", "한글"] {
             assert!(is_valid_project_id(name), "{name:?} should be accepted");
         }
+    }
+
+    #[test]
+    fn validate_never_returns_a_verbatim_prefixed_dir() {
+        let base = std::env::temp_dir().join(format!("openvids-validate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let project = validate(&base).unwrap();
+        assert!(!project.dir.to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(project.id, base.file_name().unwrap().to_string_lossy());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

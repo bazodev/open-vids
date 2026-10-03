@@ -31,6 +31,8 @@ import { useStudioExternalFileChanges } from "./hooks/useStudioExternalFileChang
 import { useBlockHandlers } from "./hooks/useBlockHandlers";
 import { useAppHotkeys } from "./hooks/useAppHotkeys";
 import { useClipboard } from "./hooks/useClipboard";
+import { useOpenvidsDesktopShortcuts } from "./hooks/useOpenvidsDesktopShortcuts";
+import { readOpenvidsHomeOrigin } from "./utils/openvidsHost";
 import { deleteSelectedKeyframes } from "./hooks/timelineEditingHelpers";
 import { useCaptionDetection } from "./hooks/useCaptionDetection";
 import { useRenderClipContent } from "./hooks/useRenderClipContent";
@@ -396,6 +398,10 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason }: St
   );
   // Once per page load: the workspace the desktop opened this project on.
   useEffect(() => applyBootWorkspace(), []);
+  // Inside the OpenVids desktop shell: the frameless-frame chords (Home,
+  // Settings, Reload) that have no menu bar on Windows. A null home origin
+  // (outside the shell) keeps the hook inert.
+  useOpenvidsDesktopShortcuts({ homeOrigin: readOpenvidsHomeOrigin() });
   useStudioUrlState({
     projectId,
     activeCompPath,

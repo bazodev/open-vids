@@ -242,7 +242,13 @@ describe("OMP project path boundary", () => {
     await mkdir(outsideDir, { recursive: true });
     await mkdir(path.join(projectDir, ".hyperframes"), { recursive: true });
     await writeFile(path.join(outsideDir, "secret.txt"), "secret");
-    await symlink(outsideDir, path.join(projectDir, "outside-link"), "dir");
+    // Directory junctions need no privilege on Windows (unlike symlinks) and
+    // resolve through realpath like the symlinked dir does on POSIX.
+    await symlink(
+      outsideDir,
+      path.join(projectDir, "outside-link"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
 
     try {
       expect(await guardToolCallPaths(projectDir, { path: "src/index.html" })).toBeNull();

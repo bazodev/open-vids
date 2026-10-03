@@ -12,12 +12,18 @@
 //! and returns the entries whose names match, so a stale pasteboard from an
 //! earlier drag can never be mistaken for this drop. Nothing is streamed
 //! through JavaScript — the files are copied from these paths on Start.
+//!
+//! Windows has no equivalent of the drag pasteboard readable from Rust, so
+//! `drag_pasteboard_paths()` stays empty there: the first Windows version is
+//! file-picker-only. The page already degrades gracefully — a drop with no
+//! pasteboard hit resolves zero files, and the composer reports every dropped
+//! name via `unresolved`/`skipped` toasts instead of promising a drop-to-add
+//! (`home.composer.skipped.*`) — so no JS change is needed.
 
 use std::path::PathBuf;
 
 /// File paths currently on the drag pasteboard. `NSFilenamesPboardType` is
 /// deprecated in favour of per-item file URLs, but Finder still writes it and
-/// it is what wry's own drop handler reads.
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
 pub fn drag_pasteboard_paths() -> Vec<PathBuf> {
@@ -45,6 +51,8 @@ pub fn drag_pasteboard_paths() -> Vec<PathBuf> {
     out
 }
 
+/// No drag-pasteboard equivalent outside macOS: Windows is file-picker-only
+/// in the first version (see the module docs), Linux keeps the old stub.
 #[cfg(not(target_os = "macos"))]
 pub fn drag_pasteboard_paths() -> Vec<PathBuf> {
     Vec::new()
@@ -71,6 +79,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(windows))]
     fn only_dropped_names_are_returned_in_drop_order() {
         let candidates = vec![
             PathBuf::from("/a/one.mov"),
@@ -87,5 +96,33 @@ mod tests {
                 PathBuf::from("/c/one.mov")
             ]
         );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn only_dropped_names_are_returned_in_drop_order() {
+        let candidates = vec![
+            PathBuf::from(r"C:\a\one.mov"),
+            PathBuf::from(r"C:\b\two.wav"),
+            PathBuf::from(r"C:\c\one.mov"),
+            PathBuf::from(r"C:\d\stale.txt"),
+        ];
+        let names = vec!["two.wav".to_string(), "one.mov".to_string(), "one.mov".to_string(), "missing.png".to_string()];
+        assert_eq!(
+            match_dropped(&names, candidates),
+            vec![
+                PathBuf::from(r"C:\b\two.wav"),
+                PathBuf::from(r"C:\a\one.mov"),
+                PathBuf::from(r"C:\c\one.mov")
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn the_windows_pasteboard_stays_empty() {
+        // First Windows version is file-picker-only: drops resolve nothing
+        // and the composer reports the names via `unresolved` toasts.
+        assert!(drag_pasteboard_paths().is_empty());
     }
 }

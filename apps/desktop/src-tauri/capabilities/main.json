@@ -1,10 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "OpenVids grants the webview window dragging only. The window loads http://127.0.0.1 pages (the Projects home and Studio) — remote origins as far as Tauri is concerned — and the overlay titlebar has no native title bar to grab, so those pages mark their titlebars with data-tauri-drag-region and need start_dragging (plus internal_toggle_maximize for the macOS double-click zoom). Nothing else: every file read, write, upload and delete already goes through the home and Studio HTTP APIs, which run in Rust or the sidecar with full OS access.",
+  "description": "OpenVids grants the webview control over its own window only. The window loads http://127.0.0.1 pages (the Projects home and Studio) — remote origins as far as Tauri is concerned — and the pages draw their own titlebars over the window frame: on macOS the overlay titlebar keeps the native traffic lights, so the pages mark their titlebars with data-tauri-drag-region and need start_dragging (plus internal_toggle_maximize for the double-click zoom); on Windows the window is frameless and the pages also draw minimize / maximize / close, which need minimize, toggle_maximize, close and reading is_maximized for the restore icon. Nothing else: every file read, write, upload and delete already goes through the home and Studio HTTP APIs, which run in Rust or the sidecar with full OS access.",
   "windows": ["main"],
   "remote": {
     "urls": ["http://127.0.0.1:*", "http://localhost:*"]
   },
-  "permissions": ["core:window:allow-start-dragging", "core:window:allow-internal-toggle-maximize"]
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized"
+  ]
 }

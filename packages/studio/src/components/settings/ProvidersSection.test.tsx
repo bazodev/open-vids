@@ -132,8 +132,8 @@ it("saves a key with a busy state, never keeps it, and shows the provider as con
   const input = keyInput("openrouter");
   expect(input?.type).toBe("password");
   expect(input?.autocomplete).toBe("off");
-  // Stored where the product really stores it: not the Keychain, not shared with OMP.
-  expect(text(row("openrouter"))).toContain("Not in the macOS Keychain, and not shared with OMP");
+  // Stored where the product really stores it: its own file, not the system keychain, not shared with OMP.
+  expect(text(row("openrouter"))).toContain("Not in the system keychain or credential store");
 
   type(input, "sk-or-secret-123");
   await click(buttonNamed("Connect", row("openrouter") ?? undefined));

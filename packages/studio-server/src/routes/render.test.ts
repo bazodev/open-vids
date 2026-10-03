@@ -856,3 +856,26 @@ describe("POST /projects/:id/renders/:filename/open — OS default player", () =
     });
   });
 });
+
+describe("GET /render/:jobId/download — Windows output paths", () => {
+  it("serves the leaf filename when the on-disk file was registered from the list route", async () => {
+    // The list route seeds `renderJobs` from on-disk files with
+    // `join(rendersDir, filename)` — backslash-separated on win32 — so the
+    // download filename must be separator-agnostic, not `/`-split.
+    const spy = vi.fn();
+    const { app, rendersDir, cleanup } = buildApp(spy);
+    try {
+      const jobId = "win-job_2026-10-02_00-00-00";
+      writeFileSync(join(rendersDir, `${jobId}.mp4`), "render-bytes");
+      const list = await app.request("http://localhost/projects/demo/renders");
+      expect(list.status).toBe(200);
+      const res = await app.request(`http://localhost/render/${jobId}/download`);
+      expect(res.status).toBe(200);
+      const header = res.headers.get("content-disposition") ?? "";
+      expect(header).toContain(`${jobId}.mp4`);
+      expect(header).not.toContain("\\");
+    } finally {
+      cleanup();
+    }
+  });
+});

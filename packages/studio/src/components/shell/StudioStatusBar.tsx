@@ -2,6 +2,7 @@ import { Folder } from "@phosphor-icons/react";
 import { isChapter } from "@hyperframes/agent-protocol";
 import { useFileManagerContext } from "../../contexts/FileManagerContext";
 import { useTranslation, type TranslationKey } from "../../i18n";
+import { resolveShortcutKey } from "../../utils/platform";
 import { usePlayerStore } from "../../player";
 import { STUDIO_PREVIEW_FPS } from "../../player/lib/time";
 import { useStoryStore } from "../../story/storyContext";
@@ -29,14 +30,19 @@ const HINTS: Record<Workspace, readonly Hint[]> = {
   ],
   media: [
     { keys: "Space", label: "studio.statusBar.hint.preview" },
-    { keys: "⌘F", label: "studio.statusBar.hint.search" },
+    { keys: resolveShortcutKey("⌘F"), label: "studio.statusBar.hint.search" },
     { label: "studio.statusBar.hint.dragToTimeline" },
   ],
 };
 
 /** `/Users/me/Movies/x` reads as `~/Movies/x`, the way the prototype prints project paths. */
-function homeRelative(path: string): string {
-  return path.replace(/^(\/Users\/[^/]+|\/home\/[^/]+)(?=\/|$)/, "~");
+export function homeRelative(path: string): string {
+  const portable = path.replace(/^(\/Users\/[^/]+|\/home\/[^/]+)(?=\/|$)/, "~");
+  if (portable !== path) return portable;
+  // Windows (`C:\Users\<name>\...`, either slash style): the macOS/Linux rule
+  // above never matches a drive-letter path, so reaching here means it did
+  // not apply and its output stays byte-identical.
+  return path.replace(/^[A-Za-z]:[\\/]Users[\\/][^\\/]+(?=[\\/]|$)/i, "~");
 }
 
 /** The window's bottom line: where the project lives, then the shown workspace's hints and state. */

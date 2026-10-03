@@ -55,12 +55,17 @@ describe("project config creation", () => {
     expect(fs.readFileSync(path, "utf-8")).toBe(winner);
   });
 
-  it("does not create a dangling symlink target when seeding an absent config", () => {
-    const dir = project();
-    const target = join(dir, "missing.json");
-    fs.symlinkSync(target, projectConfigPath(dir));
-    seedProjectAuthoringSkill(dir, "slideshow");
-    expect(fs.existsSync(target)).toBe(false);
-    expect(fs.lstatSync(projectConfigPath(dir)).isSymbolicLink()).toBe(true);
-  });
+  // The fixture plants a dangling symlink, which needs elevation / Developer
+  // Mode on Windows (EPERM without it) — skip there; POSIX still guards it.
+  it.skipIf(process.platform === "win32")(
+    "does not create a dangling symlink target when seeding an absent config",
+    () => {
+      const dir = project();
+      const target = join(dir, "missing.json");
+      fs.symlinkSync(target, projectConfigPath(dir));
+      seedProjectAuthoringSkill(dir, "slideshow");
+      expect(fs.existsSync(target)).toBe(false);
+      expect(fs.lstatSync(projectConfigPath(dir)).isSymbolicLink()).toBe(true);
+    },
+  );
 });

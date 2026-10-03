@@ -17,6 +17,7 @@ function validatePythonOverride(override: string): PythonOverrideValidation {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5000,
+      windowsHide: true,
     });
     if (/Python 3/.test(version)) return { ok: true };
     return {
@@ -39,6 +40,7 @@ export function findPython(): string | undefined {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 5000,
+        windowsHide: true,
       });
       const first = output
         .split(/\r?\n/)
@@ -51,6 +53,7 @@ export function findPython(): string | undefined {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 5000,
+        windowsHide: true,
       }).trim();
 
       if (version.includes("Python 3")) return first;

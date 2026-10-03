@@ -208,7 +208,9 @@ describe("file route containment", () => {
     expect(existsSync(join(project, "..unsafe.txt"))).toBe(false);
   });
 
-  it.each([false, true])(
+  // File symlinks need SeCreateSymbolicLinkPrivilege on Windows (junctions
+  // cannot stand in: only a file link exercises the dangling-upload path).
+  it.skipIf(process.platform === "win32").each([false, true])(
     "does not follow a dangling upload symlink (renamed: %s)",
     async (collision, context) => {
       const { app, project, outside } = fixture();

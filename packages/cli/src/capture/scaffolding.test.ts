@@ -95,14 +95,19 @@ describe("generateProjectScaffold metadata", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("does not follow a dangling metadata symlink", async () => {
-    const target = join(dir, "missing-target.json");
-    fs.symlinkSync(target, metaPath);
-    await generate();
-    expect(fs.lstatSync(metaPath).isSymbolicLink()).toBe(true);
-    expect(fs.existsSync(target)).toBe(false);
-    expect(warnings).toEqual([]);
-  });
+  // Creating the dangling-symlink fixture needs elevation / Developer Mode on
+  // Windows (EPERM without it) — skip there; POSIX still guards this path.
+  it.skipIf(process.platform === "win32")(
+    "does not follow a dangling metadata symlink",
+    async () => {
+      const target = join(dir, "missing-target.json");
+      fs.symlinkSync(target, metaPath);
+      await generate();
+      expect(fs.lstatSync(metaPath).isSymbolicLink()).toBe(true);
+      expect(fs.existsSync(target)).toBe(false);
+      expect(warnings).toEqual([]);
+    },
+  );
 
   it("propagates write errors other than EEXIST", async () => {
     fs.rmSync(dir, { recursive: true });

@@ -197,6 +197,14 @@ export function registerRenderRoutes(
   };
   const RENDER_EXTENSIONS = Object.keys(RENDER_MIME);
 
+  function renderBasename(filePath: string): string {
+    // `outputPath` is built with `join()` on this machine, so it carries this
+    // OS's separators — but a job registered from disk (or a path with mixed
+    // separators) may carry the other kind. Split on both so the
+    // Content-Disposition filename is the leaf on Windows too.
+    return filePath.split(/[\\/]/).pop() || "render.mp4";
+  }
+
   function renderContentType(filePath: string): string {
     const ext = RENDER_EXTENSIONS.find((e) => filePath.endsWith(e));
     return (ext && RENDER_MIME[ext]) ?? "video/mp4";
@@ -210,7 +218,7 @@ export function registerRenderRoutes(
       return c.json({ error: "not found" }, 404);
     }
     const contentType = renderContentType(job.outputPath);
-    const filename = job.outputPath.split("/").pop() ?? `render.mp4`;
+    const filename = renderBasename(job.outputPath);
     return fileResponse(job.outputPath, c.req.header("Range"), {
       "Content-Type": contentType,
       "Content-Disposition": contentDispositionHeader("inline", filename),
@@ -225,7 +233,7 @@ export function registerRenderRoutes(
       return c.json({ error: "not found" }, 404);
     }
     const contentType = renderContentType(job.outputPath);
-    const filename = job.outputPath.split("/").pop() ?? `render.mp4`;
+    const filename = renderBasename(job.outputPath);
     return fileResponse(job.outputPath, c.req.header("Range"), {
       "Content-Type": contentType,
       "Content-Disposition": contentDispositionHeader("attachment", filename),
@@ -237,7 +245,7 @@ export function registerRenderRoutes(
     const { jobId } = c.req.param();
     for (const [, state] of renderJobs) {
       if (state.id === jobId && state.outputPath) {
-        const dir = state.outputPath.replace(/\/[^/]+$/, "");
+        const dir = dirname(state.outputPath);
         for (const ext of [".mp4", ".webm", ".mov", ".meta.json"]) {
           const fp = join(dir, `${jobId}${ext}`);
           if (existsSync(fp)) unlinkSync(fp);

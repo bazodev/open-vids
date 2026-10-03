@@ -1318,22 +1318,27 @@ describe("downloadToTemp atomic publication and bounded retry", () => {
     expect(temporaryDownloadEntries(dir)).toEqual([]);
   });
 
-  it("does not trust a nonempty symlink at the final cache path", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("downloaded"));
-    vi.stubGlobal("fetch", fetchMock);
-    const dir = makeTempDir();
-    const target = join(dir, "attacker-controlled.mp4");
-    const cachePath = join(dir, "download_eda0de5dc5a3.mp4");
-    writeFileSync(target, "not-the-download");
-    symlinkSync(target, cachePath);
+  // The fixture plants a real symlink, which needs elevation / Developer Mode
+  // on Windows (EPERM without it) — skip there; POSIX still guards this path.
+  it.skipIf(process.platform === "win32")(
+    "does not trust a nonempty symlink at the final cache path",
+    async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response("downloaded"));
+      vi.stubGlobal("fetch", fetchMock);
+      const dir = makeTempDir();
+      const target = join(dir, "attacker-controlled.mp4");
+      const cachePath = join(dir, "download_eda0de5dc5a3.mp4");
+      writeFileSync(target, "not-the-download");
+      symlinkSync(target, cachePath);
 
-    const path = await downloadToTemp("https://cdn.example/stale-empty.mp4", dir, 1_000);
+      const path = await downloadToTemp("https://cdn.example/stale-empty.mp4", dir, 1_000);
 
-    expect(path).toBe(cachePath);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(readFileSync(path, "utf8")).toBe("downloaded");
-    expect(readFileSync(target, "utf8")).toBe("not-the-download");
-  });
+      expect(path).toBe(cachePath);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(readFileSync(path, "utf8")).toBe("downloaded");
+      expect(readFileSync(target, "utf8")).toBe("not-the-download");
+    },
+  );
 
   it("does not retry caller cancellation", async () => {
     const fetchMock = vi.fn();

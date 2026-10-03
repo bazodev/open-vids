@@ -10,13 +10,299 @@
 .window::after {
   display: none;
 }
+/* Custom frame (Windows): the window can be narrower than the page's natural
+   width (a small or high-DPI screen). The grid track must shrink to the
+   viewport and the titlebar clip its overflowing tools, or the caption
+   buttons are laid out past the right edge, out of reach. macOS keeps the
+   automatic track. */
+html.custom-frame .window {
+  grid-template-columns: minmax(0, 1fr);
+}
+html.custom-frame .titlebar {
+  min-width: 0;
+  overflow: hidden;
+}
 body {
   background: var(--bg-0);
 }
-.tl-group {
-  width: 52px;
-  height: 12px;
+/* On the Windows custom frame the traffic-light spacer is gone (home.js hides
+   .tl-group) and the page draws its own caption buttons on the right instead.
+   Plain CSS shapes (no icon font): the glyphs are borders and boxes, so they
+   stay crisp at any DPI and follow --fg without new assets. The buttons sit
+   outside the drag region (titlebar children are no-drag by default in ov.css),
+   are excluded from Tab order (tabindex=-1: a caption button is a pointer
+   affordance, not a document control), and only appear when [hidden] is
+   removed — macOS never shows them. */
+.tl-group[hidden],
+.win-controls[hidden],
+.win-controls-sep[hidden] {
+  display: none;
+}
+html:not(.custom-frame) .app-menu-btn[hidden] {
+  display: none;
+}
+/* The app menu button: a 36x36 hit area whose 21 px mark stays inside it
+   (`.app-mark` sizes the svg; the button centres it, no spill). An icon-btn
+   in shape (hover wash, focus ring inside — unlike the caption buttons this
+   one IS tabbable), wearing the app mark. macOS never shows it. */
+html.custom-frame .app-menu-btn {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--fg);
+  cursor: default;
+  overflow: hidden;
+}
+html.custom-frame .app-menu-btn .app-mark {
+  width: 21px;
+  height: auto;
+  max-height: 21px;
+  flex: none;
+}
+html.custom-frame .app-menu-btn:hover {
+  background: var(--surface-2);
+}
+html.custom-frame .app-menu-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Windows custom frame menu bar (File Edit View Window Help), shown by
+     home.js when OV.isCustomFrame(). Wears the toolbar's own button shape
+     (height, radius, hover wash) with plain-text labels in the app's UI font.
+     Order: [mark][menu labels] … [Open][New][search][toggle][gear][gap][caps].
+     The search field itself is window-centred (see .tb-mid); the tools flank
+     it. macOS never shows this (its native bar owns the menus). */
+html:not(.custom-frame) .app-menu-btn {
+  display: none;
+}
+.menubar[hidden],
+html:not(.custom-frame) .menubar {
+  display: none;
+}
+html.custom-frame .menubar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.menubar-item {
+  display: inline-flex;
+  align-items: center;
+  height: var(--h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  cursor: default;
+  white-space: nowrap;
+}
+.menubar-item:hover,
+.menubar-item[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.menubar-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* The big wordmark is macOS-only: on the custom frame the small mark in the
+   corner already carries the brand, so #brandWordmark leaves the layout. */
+html.custom-frame #brandWordmark {
+  display: none;
+}
+html.custom-frame #brandWordmark + .tb-spacer-left {
+  display: none;
+}
+/* The centred row, in DOM order: [Open][New] then the search, then the view
+   toggle + gear. The search FIELD itself is window-centred (its centre = the
+   window's centre ±2 px at >= 1100 px): #tb-mid is absolutely centred on the
+   titlebar, and the field fills it while the flanking groups keep their
+   intrinsic widths. */
+html.custom-frame #tb-mid {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  pointer-events: none;
+}
+/* #tb-mid is click-through (its empty gaps stay part of the window drag
+   region), and `pointer-events` inherits: every control inside has to opt
+   back in, or the gear, toggle, Open/New and the search cannot be clicked. */
+html.custom-frame #tb-mid > * {
+  pointer-events: auto;
+}
+html.custom-frame #tb-mid > .tb-side {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  min-width: 0;
+}
+html.custom-frame #tb-mid .field {
+  width: min(420px, 100%);
+  flex: 0 1 420px;
+  min-width: 120px;
+}
+/* Narrow custom-frame windows: the search yields first (flex min), then below
+   1100 px the menu labels collapse into the mark's compact menu (home.js sets
+   .is-compact) and the field drops to its minimum; nothing overlaps or pushes
+   the pinned caption buttons out. */
+html.custom-frame.is-compact .menubar {
+  display: none;
+}
+/* Sheets and menus must never cover the caption buttons: the layer shares
+   the window grid, so cap its width before the pinned 138 px button strip. */
+html.custom-frame #layer .menu,
+html.custom-frame #layer .sheet,
+html.custom-frame #layer .toast {
+  max-width: calc(100vw - 170px);
+}
+html.custom-frame .win-controls {
+  /* Above every page overlay (launch splash, onboarding, scrim, sheets,
+     menus, toasts) but below the Settings frame: the caption buttons stay
+     hit-testable whenever they are drawn. */
+  z-index: 90;
+  /* Pinned to the header's right edge, out of the flex row entirely: the
+     tools row can overflow on narrow windows, and anything negotiating flex
+     space with it risks being pushed past the edge. Absolute positioning
+     keeps the caption buttons reachable at every window size. */
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+}
+/* The caption strip owns the rightmost 138 px (3 x 46 px); a mandatory 16 px
+   gap stands between the last tool and the first caption button at every
+   width. fitSearch (home.js) sizes #tb-mid to include both, so the centred
+   search never has to match a spacer — the reserve lives in the row width. */
+/* macOS overlay frame: byte-identical packed row — the left spacer stays the flex
+   pusher, the center wrapper disappears (display:contents) and the right tools
+   carry no caption margin (there are no caption buttons to clear). */
+html:not(.custom-frame) .tb-spacer-right {
+  display: none;
+}
+html:not(.custom-frame) .tb-search-center {
+  display: contents;
+}
+html:not(.custom-frame) #tb-new,
+html:not(.custom-frame) #tb-tools {
+  margin-right: 0;
+}
+/* Anchor for the pinned buttons and the centred middle (the header is the offset parent). */
+.titlebar {
+  position: relative;
+}
+/* The separator between tools and caption buttons is obsolete with absolute
+   positioning (the buttons float over the header's right padding). Kept
+   hidden for macOS parity in the markup. */
+.win-controls-sep {
+  display: none;
+}
+.win-btn {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-2);
+  cursor: default;
+}
+.win-btn:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.win-btn.close:hover {
+  background: oklch(62% 0.22 25);
+  color: white;
+}
+/* Pointer-only controls (tabindex -1, never reached by keyboard): the webview's
+   initial focus can still land on one, and a ring there reads as a bug. */
+.win-btn:focus-visible {
+  outline: none;
+}
+/* Minimize: a 10 px bar. Maximize: a 10×10 outline (the window is zoomed out).
+   Restore (`.is-maximized` on the group): two aligned 8×8 px outlined squares,
+   the back one offset up-right by 2 px. The front square is filled with the
+   button background (`background-color: inherit` tracks the fill, hover
+   included) so it masks the back square where they overlap instead of drawing
+   a stray bracket. 10 px total, like maximize. */
+.win-btn::before {
+  content: "";
+  display: block;
+  box-sizing: border-box;
+}
+.win-btn#winMin::before {
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+}
+.win-btn#winMax::before {
+  width: 10px;
+  height: 10px;
+  border: 1px solid currentColor;
+}
+.win-controls.is-maximized .win-btn#winMax {
+  position: relative;
+}
+.win-controls.is-maximized .win-btn#winMax::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  background-color: inherit;
+  transform: translate(-1px, 1px);
+}
+.win-controls.is-maximized .win-btn#winMax::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  top: calc(50% - 5px);
+  left: calc(50% - 3px);
+}
+/* Close: two 12 px strokes. */
+.win-btn.close::before,
+.win-btn.close::after {
+  width: 12px;
+  height: 1px;
+  background: currentColor;
+  position: absolute;
+}
+.win-btn.close {
+  position: relative;
+}
+.win-btn.close::before {
+  transform: rotate(45deg);
+}
+.win-btn.close::after {
+  content: "";
+  display: block;
+  box-sizing: border-box;
+  transform: rotate(-45deg);
 }
 .titlebar .brand svg {
   pointer-events: none;

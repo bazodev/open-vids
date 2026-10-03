@@ -4,8 +4,10 @@ import type { TranslationKey } from "../../i18n";
 export const STUDIO_PLAIN_KEYS = { fullscreen: "f", split: "s", record: "r" } as const;
 
 /**
- * `key` is a keycap (`Space`, `⌘Z`) or the translation key of a gesture (`Drag edge`); `label` is a translation
- * key. The panel translates a value that is a catalog key and shows anything else (an embedder's own list) as is.
+ * `key` is a keycap (`Space`, `⌘Z` on macOS / `Ctrl+Z` on Windows) or the translation key of a gesture
+ * (`Drag edge`); `label` is a translation key. The panel translates a value that is a catalog key (taking the
+ * `.win` variant on Windows) and resolves Mac keycaps via `resolveShortcutKey`, showing anything else
+ * (an embedder's own list) as is.
  */
 export interface ShortcutHint {
   key: string;

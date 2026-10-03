@@ -11,7 +11,8 @@
 //!   `OPENVIDS_AGENT_PARENT_PID` (the runtime exits when this process dies);
 //! - ready once it printed its `{"openvids-agent":"listening","port":N}` line
 //!   and `GET /v1/health` answers;
-//! - placed in its own process group and killed with it on shutdown.
+//! - placed in its own supervision scope (`crate::proc`: process group on
+//!   unix, Job Object on Windows) and killed with it on shutdown.
 //!
 //! Only the global routes are proxied (`/v1/models`, `/v1/settings`); they
 //! need the bearer token and no project scope. Settings live in
@@ -54,7 +55,7 @@ fn launch() -> Option<(PathBuf, PathBuf)> {
     let bun_override = std::env::var_os("OPENVIDS_AGENT_BUN").map(PathBuf::from);
     if let Some(entry) = std::env::var_os("OPENVIDS_AGENT_RUNTIME_ENTRY").map(PathBuf::from) {
         if entry.is_absolute() && entry.is_file() {
-            return Some((bun_override.unwrap_or_else(|| PathBuf::from("bun")), entry));
+            return Some((bun_override.unwrap_or_else(|| PathBuf::from(crate::platform::BUN_BIN)), entry));
         }
     }
     if let Some((bun, entry)) = PROD_ENTRY.lock().ok().and_then(|s| s.clone()) {
@@ -71,7 +72,7 @@ fn launch() -> Option<(PathBuf, PathBuf)> {
         .join("src")
         .join("main.ts");
     if dev.is_file() {
-        return Some((bun_override.unwrap_or_else(|| PathBuf::from("bun")), dev));
+        return Some((bun_override.unwrap_or_else(|| PathBuf::from(crate::platform::BUN_BIN)), dev));
     }
     None
 }
@@ -96,11 +97,10 @@ fn spawn() -> Result<Running, CodedError> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+    for (key, value) in super::ffmpeg_install::managed_env() {
+        command.env(key, value);
     }
+    crate::proc::configure(&mut command);
     let mut child = command.spawn().map_err(|e| {
         CodedError::new(
             "agent_start_failed",
@@ -108,6 +108,7 @@ fn spawn() -> Result<Running, CodedError> {
             json!({ "path": bun.display().to_string(), "detail": e.to_string() }),
         )
     })?;
+    crate::proc::track(&child);
     if let Some(stderr) = child.stderr.take() {
         std::thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -171,28 +172,16 @@ fn lifecycle_port(line: &str) -> Option<u16> {
     u16::try_from(value.get("port")?.as_u64()?).ok().filter(|p| *p > 0)
 }
 
+/// The runtime gets 2 s to shut down cleanly before the fatal stop.
+const KILL_GRACE: Duration = Duration::from_secs(2);
+
 fn kill(child: &mut Child) {
-    #[cfg(unix)]
-    {
-        let pid = child.id() as libc::pid_t;
-        if pid > 0 {
-            unsafe { libc::killpg(pid, libc::SIGTERM) };
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                if matches!(child.try_wait(), Ok(Some(_))) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            unsafe { libc::killpg(pid, libc::SIGKILL) };
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+    crate::proc::terminate(child, KILL_GRACE);
 }
 
 /// Stop the runtime (app exit). The runtime's parent-pid watch is the
-/// backstop when this never runs (SIGKILL, crash).
+/// backstop on unix when this never runs (SIGKILL, crash); on Windows the
+/// kill-on-close Job Object is the backstop.
 pub fn shutdown() {
     if let Ok(mut slot) = RUNTIME.lock() {
         if let Some(mut running) = slot.take() {

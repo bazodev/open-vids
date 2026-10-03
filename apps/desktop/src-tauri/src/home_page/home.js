@@ -85,6 +85,157 @@
       el.dataset.tip = tr(el.dataset.tipI18n);
     });
     paintUpdate();
+    paintWindowControls();
+    /* Copy-only platform keycaps: the static markup names the Mac keys (data-kbd, the search ⌘F cap).
+       Early-return on macOS (byte-identical); on Windows each cap is spelled out once
+       (dataset.macKbd keeps the Mac original, so a language repaint cannot double-convert). */
+    if (OV.isMacOs()) return;
+    document.querySelectorAll("[data-kbd]").forEach((el) => {
+      if (!el.dataset.macKbd) el.dataset.macKbd = el.dataset.kbd;
+      el.dataset.kbd = OV.shortcutKey(el.dataset.macKbd);
+    });
+    document.querySelectorAll("#field > .kbd").forEach((el) => {
+      if (!el.dataset.macKbd) el.dataset.macKbd = el.textContent;
+      el.textContent = OV.shortcutKey(el.dataset.macKbd);
+    });
+  }
+
+  /* Windows custom frame (OV.isCustomFrame(), from Rust via OV_BOOT.frame):
+     the traffic-light spacer is hidden and the page's own caption buttons run
+     the window through the Tauri IPC Tauri injects in every webview
+     (capabilities/main.json grants exactly these four). The double-click
+     zoom comes from Tauri's own drag.js on the drag region — not wired here.
+     The buttons stay out of Tab order (caption buttons are pointer controls)
+     and out of the global shortcuts (the handler below skips them by id). */
+  function paintWindowControls() {
+    const group = $("#winControls");
+    if (!group) return;
+    if (!OV.isCustomFrame()) return;
+    document.documentElement.classList.add("custom-frame");
+    document.querySelector(".tl-group")?.setAttribute("hidden", "");
+    // The mark button keeps the traffic-light inset's slot; the big wordmark
+    // next to Help leaves the layout (the corner mark carries the brand).
+    document.querySelector("#brandWordmark")?.setAttribute("hidden", "");
+    // The mark button is a real control, not a pointer affordance, so it
+    // stays in Tab order — unlike the caption buttons.
+    document.querySelector("#appMenuBtn")?.removeAttribute("hidden");
+    // The menu bar (File…Help) sits between the mark and the centred middle;
+    // it is hidden again below ~1100 px where the labels would crowd it.
+    document.querySelector("#menuBar")?.removeAttribute("hidden");
+    requestAnimationFrame(checkCompact);
+    fitSearch();
+    // The caption group itself: [hidden] would otherwise keep the whole row
+    // (and the separator after #tb-tools) out of the layout — an earlier pass
+    // unhid only #appMenuBtn, leaving min/max/close invisible on Windows.
+    group.removeAttribute("hidden");
+    document.querySelector(".win-controls-sep")?.removeAttribute("hidden");
+    const maxBtn = $("#winMax");
+    // The maximize poll: the restore glyph follows the real window state.
+    // `is_maximized` answers through the same IPC; on resize (Win+arrows,
+    // edge snap, double-click zoom, taskbar) the state may have changed, so
+    // re-read and flip the glyph + accessible name.
+    const pollMaximized = () => {
+      const p = OV.invoke("is_maximized");
+      if (p && typeof p.then === "function")
+        p.then((v) => setMaximized(v === true)).catch(() => {});
+    };
+    const setMaximized = (on) => {
+      group.classList.toggle("is-maximized", on);
+      maxBtn.setAttribute(
+        "aria-label",
+        tr(on ? "window.controls.restore" : "window.controls.maximize"),
+      );
+    };
+    if (!group.dataset.wired) {
+      group.dataset.wired = "1";
+      $("#winMin").addEventListener("click", () => OV.invoke("minimize"));
+      $("#winMax").addEventListener("click", () => OV.invoke("toggle_maximize"));
+      $("#winClose").addEventListener("click", () => OV.invoke("close"));
+      window.addEventListener("resize", () => {
+        pollMaximized();
+        checkCompact();
+        fitSearch();
+      });
+      // The webview can paint before the IPC channel is up; poll once late.
+      setTimeout(pollMaximized, 500);
+    }
+    pollMaximized();
+    checkCompact();
+    fitSearch();
+  }
+
+  /* The search FIELD is window-centred (its centre = the window's centre ±2 px
+     at >= 1100 px): #tb-mid is absolutely centred on the titlebar, and the
+     field fills the space left between the flanking groups. Below 1100 px the
+     field drops to its 120 px minimum; the row never overlaps because the
+     middle clamps to the bar (see home.css). Runs after fonts settle, so the
+     measured button widths are final. */
+  function fitSearch() {
+    if (!OV.isCustomFrame()) return;
+    const mid = document.querySelector("#tb-mid");
+    const field = document.querySelector("#tb-mid #field");
+    const bar = document.querySelector(".titlebar");
+    if (!mid || !field || !bar) return;
+    // Measure the flanking groups without the centred row's own margin and
+    // without the field's target width: park the row off-centre, read the
+    // intrinsic group widths, then centre the field and size the row to fit.
+    mid.style.width = "max-content";
+    field.style.width = "120px";
+    field.style.flex = "none";
+    const barW = bar.getBoundingClientRect().width || window.innerWidth;
+    const tools = document.querySelector("#tb-tools");
+    const savedMargin = tools ? tools.style.marginRight : "";
+    if (tools) tools.style.marginRight = "0";
+    const leftW = document.querySelector("#tb-new")?.getBoundingClientRect().width || 0;
+    const rightW = document.querySelector("#tb-tools")?.getBoundingClientRect().width || 0;
+    if (tools) tools.style.marginRight = savedMargin;
+    const gap = 8;
+    const reserve = 138 + 16;
+    // The field is window-centred: its half-width plus the wider flank must
+    // fit in half the bar (8 px outer slack), and the whole row must clear
+    // the caption strip. Below 1100 px the field takes its 120 px minimum.
+    const halfFree = Math.max(0, barW / 2 - 8);
+    const fieldW = Math.max(120, Math.min(420, halfFree - Math.max(leftW, rightW) - gap));
+    mid.style.width = Math.round(leftW + gap + fieldW + gap + rightW + reserve) + "px";
+    collapseOnOverlap();
+    // The row is centred as a whole, but the FIELD must be window-centred:
+    // shift the row so the field's centre lands on the bar's centre. Positive
+    // when the right flank (tools + caption reserve) outweighs the left.
+    mid.style.transform =
+      "translateX(calc(-50% + " + Math.round((rightW + reserve - leftW) / 2) + "px))";
+    field.style.width = Math.round(fieldW) + "px";
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => fitSearch()).catch(() => {});
+  }
+  /* The 1100 px collapse is a floor, not a ceiling: with a wide language
+     (RU labels) or a narrow-centred row the bar can still touch the middle,
+     so the menu also hides on measured overlap and stays hidden. */
+  function collapseOnOverlap() {
+    if (!OV.isCustomFrame()) return;
+    const menu = document.querySelector("#menuBar");
+    const mid = document.querySelector("#tb-mid");
+    if (!menu || !mid || menu.hidden) return;
+    const mr = menu.getBoundingClientRect();
+    const midr = mid.getBoundingClientRect();
+    if (mr.right + 8 > midr.left) {
+      menu.hidden = true;
+      document.documentElement.classList.add("is-compact");
+    }
+  }
+
+  /* Narrow custom-frame windows: the search shrinks first (CSS min), then
+     below ~1100 px the labels collapse into the mark's compact menu, so
+     nothing overlaps or pushes the pinned caption buttons out. */
+  function checkCompact() {
+    if (!OV.isCustomFrame()) return;
+    const narrow = window.innerWidth < 1100;
+    document.documentElement.classList.toggle("is-compact", narrow);
+    const bar = document.querySelector("#menuBar");
+    if (bar) bar.hidden = narrow;
+    // checkCompact can run after fitSearch (rAF, resize): re-apply the
+    // measured collapse so the menu never re-covers the centred row.
+    if (!narrow) collapseOnOverlap();
   }
 
   /* ---------- update badge: an accent dot on Settings while a newer version waits (GET /api/update/status) ---------- */
@@ -504,7 +655,7 @@
       hint("↑↓←→", "home.hint.select"),
       hint("↵", "home.hint.open"),
       hint("F2", "home.hint.rename"),
-      hint("⌘F", "home.hint.search"),
+      hint(OV.shortcutKey("⌘F"), "home.hint.search"),
     ];
     let left;
     if (S.loading) left = esc(OVI18N.t("home.status.loading"));
@@ -614,6 +765,12 @@
 
   /* ---------- menus ---------- */
   function itemMenu(p, at) {
+    /* Copy-only platform resolution: kbds spell out on Windows, reveal/trash take their .win variants there. */
+    var revealLabel = esc(OV.pt("home.item.reveal"));
+    var revealKbd = OV.shortcutKey("⇧⌘R");
+    var dupKbd = OV.shortcutKey("⌘D");
+    var rmKbd = OV.shortcutKey("⌘⌫");
+    var trashKey = prefs.confirmTrash === false ? "home.item.trash" : "home.item.trashConfirm";
     if (p.missing)
       return [
         { label: th("home.item.locate"), icon: "locate", act: () => locate(p, at) },
@@ -621,24 +778,24 @@
         {
           label: th("home.item.removeFromRecent"),
           icon: "x",
-          kbd: "⌘⌫",
+          kbd: rmKbd,
           act: () => remove(p, at),
         },
       ];
     return [
       { label: th("home.item.open"), icon: "folder-open", kbd: "↵", act: () => openProject(p, at) },
       { label: th("home.item.rename"), icon: "pencil", kbd: "F2", act: () => startRename(p, at) },
-      { label: th("home.item.reveal"), icon: "folder", kbd: "⇧⌘R", act: () => reveal(p) },
-      { label: th("home.item.duplicate"), icon: "copy", kbd: "⌘D", act: () => duplicate(p, at) },
+      { label: revealLabel, icon: "folder", kbd: revealKbd, act: () => reveal(p) },
+      { label: th("home.item.duplicate"), icon: "copy", kbd: dupKbd, act: () => duplicate(p, at) },
       { sep: 1 },
       {
         label: th("home.item.removeFromRecent"),
         icon: "x",
-        kbd: "⌘⌫",
+        kbd: rmKbd,
         act: () => remove(p, at),
       },
       {
-        label: th(prefs.confirmTrash === false ? "home.item.trash" : "home.item.trashConfirm"),
+        label: esc(OV.pt(trashKey)),
         icon: "trash",
         danger: 1,
         act: () => trash(p, at),
@@ -765,19 +922,20 @@
   }
   function trash(p, at) {
     if (prefs.confirmTrash === false) return doTrash(p, at);
+    /* Copy-only: the title/body/hint/button take their .win variants on Windows. */
     const { sh, close } = sheet(
       "<h3>" +
-        th("home.trash.title", { name: p.name }) +
+        esc(OV.pt("home.trash.title", { name: p.name })) +
         "</h3><p>" +
-        th("home.trash.body") +
+        esc(OV.pt("home.trash.body")) +
         '</p><p class="np-path">' +
         esc(p.dir) +
         "</p><p>" +
-        th("home.trash.hint") +
+        esc(OV.pt("home.trash.hint")) +
         '</p><div class="sheet-actions"><button class="btn" type="button" data-cancel>' +
         th("common.cancel") +
         '</button><button class="btn btn-danger" type="button" id="trOk">' +
-        th("home.item.trash") +
+        esc(OV.pt("home.item.trash")) +
         "</button></div>",
       { role: "alertdialog" },
     );
@@ -798,9 +956,15 @@
         render();
         if (at === "strip") land(at, null, si);
         else if (next) select(next.id, { focus: true });
-        toast(th("home.toast.trashed", { name: p.name }));
+        toast(esc(OV.pt("home.toast.trashed", { name: p.name })));
       })
-      .catch(fail("home.error.trash", { name: p.name }));
+      .catch((err) =>
+        toast(
+          esc(OV.pt("home.error.trash", { name: p.name, message: describeError(err) })),
+          null,
+          "error",
+        ),
+      );
   }
 
   /* ---------- opening: the window stays here until Studio is up, then navigates ---------- */
@@ -965,9 +1129,12 @@
     n === "." || n === ".." || /[:/\\]/.test(n) || [...n].some((c) => c.charCodeAt(0) < 0x20);
   const opt = (v, l, on) =>
     '<option value="' + v + '"' + (on ? " selected" : "") + ">" + l + "</option>";
+  /* The boot prefs always carry newProject (Rust normalises it), so this only
+     covers a page opened without boot state (tests). Keep the default platform-specific:
+     Windows Documents, macOS/Linux Movies. */
   const np = () =>
     prefs.newProject || {
-      location: "~/Movies/OpenVids",
+      location: /windows/i.test(navigator.userAgent) ? "~/Documents/OpenVids" : "~/Movies/OpenVids",
       width: 1920,
       height: 1080,
       fps: 24,
@@ -1294,13 +1461,12 @@
   /* ---------- events ---------- */
   /* Shortcuts shared by a Recent item and a Last Opened card; `at` says where focus lands afterwards. */
   function itemKey(e, p, at, el) {
-    const mod = e.metaKey || e.ctrlKey,
-      k = e.key.toLowerCase();
+    const mod = e.metaKey || e.ctrlKey;
     if (e.key === "Enter" && !e.target.closest("button")) openProject(p, at);
     else if (e.key === "F2" && !p.missing) startRename(p, at);
     else if ((mod && e.key === "Backspace") || e.key === "Delete") remove(p, at);
-    else if (mod && k === "d" && !p.missing) duplicate(p, at);
-    else if (mod && e.shiftKey && k === "r" && !p.missing) reveal(p);
+    else if (mod && OV.matchesKey(e, "d") && !p.missing) duplicate(p, at);
+    else if (mod && e.shiftKey && OV.matchesKey(e, "r") && !p.missing) reveal(p);
     else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       const r = el.getBoundingClientRect();
       (at === "strip" ? stripMenu : menuFor)(p, r.left + 24, r.top + 48);
@@ -1509,10 +1675,26 @@
 
   document.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey,
-      k = e.key.toLowerCase();
-    if (mod && e.key === ",") {
+      match = (want) => OV.matchesKey(e, want);
+    if (mod && match(",")) {
       e.preventDefault();
       return openSettings($("#settingsBtn"), settingsSection());
+    }
+    // No system frame, no menu bar: these chords have no native home on
+    // Windows, so the page owns them as plain navigations — Show All Projects
+    // is a document navigation to the home origin (the `on_navigation` hook
+    // in Rust runs the same cleanup as the menu), Reload is a reload. The
+    // native menu keeps the same accelerators as fallback; both take the same
+    // path, so the two cannot drift apart. macOS keeps its menu accelerators
+    // only (this handler is harmless there: the menu consumes the keys first
+    // and hands Open/Home over by `window.ovHome` eval).
+    if (mod && match("o") && e.shiftKey) {
+      e.preventDefault();
+      return location.assign("/");
+    }
+    if (mod && match("r") && !e.shiftKey) {
+      e.preventDefault();
+      return location.reload();
     }
     if (
       settingsFrame ||
@@ -1520,15 +1702,15 @@
       e.target.closest(".menu, .sheet, .ov-chat, textarea, [contenteditable]")
     )
       return;
-    if (mod && k === "n") {
+    if (mod && match("n")) {
       e.preventDefault();
       return newSheet();
     }
-    if (mod && k === "o") {
+    if (mod && match("o")) {
       e.preventDefault();
       return openPicker();
     }
-    if (mod && k === "f") {
+    if (mod && match("f")) {
       e.preventDefault();
       if (!search.disabled) {
         search.focus();
@@ -1536,9 +1718,9 @@
       }
       return;
     }
-    if (mod && (k === "1" || k === "2")) {
+    if (mod && (match("1") || match("2"))) {
       e.preventDefault();
-      return setView(k === "1" ? "grid" : "list");
+      return setView(OV.matchesKey(e, "1") ? "grid" : "list");
     }
     if (e.target.matches("input") || e.target.closest("#lastOpened")) return;
     const p = S.sel && byId(S.sel);
@@ -1864,8 +2046,21 @@
     document.documentElement.classList.contains("is-onboarding") ||
     !!(window.OVOB && window.OVOB.isOpen());
   function lockPage(on) {
-    for (const el of win.children)
-      if (el.id !== "ob" && el.id !== "launch" && el.tagName !== "SCRIPT") el.inert = on;
+    for (const el of win.children) {
+      if (el.id === "ob" || el.id === "launch" || el.tagName === "SCRIPT") continue;
+      // The custom frame's window buttons stay usable under the lock (Close during
+      // setup); everything else in the titlebar is held inert.
+      if (el.classList.contains("titlebar")) {
+        for (const part of el.children)
+          if (part.id !== "winControls" && part.id !== "appMenuBtn" && part.id !== "menuBar")
+            part.inert = on;
+        // The centred row holds the project buttons: lock it as one unit.
+        const mid = el.querySelector("#tb-mid");
+        if (mid) mid.inert = on;
+        continue;
+      }
+      el.inert = on;
+    }
   }
   function openOnboarding(manual) {
     if (window.OVOB && window.OVOB.isOpen()) return Promise.resolve();
@@ -1909,6 +2104,8 @@
   if (document.documentElement.classList.contains("is-onboarding"))
     openOnboarding(!!(window.OV_BOOT && window.OV_BOOT.openOnboarding));
 
+  /* Shared by the mark button's compact menu and the menu bar's Help menu. */
+  const aboutSheetRef = { current: null };
   /* ⌘O from the app menu lands here (the menu accelerator consumes the key). */
   window.ovHome = {
     openProject: () => !onboardingOpen() && openPicker(),
@@ -1925,6 +2122,264 @@
         settingsFrame.contentWindow.focus();
       } else openSettings($("#settingsBtn"), "general");
     },
+    openAbout: () => aboutSheetRef.current && aboutSheetRef.current(),
     openOnboarding: () => openOnboarding(true),
   };
+
+  /* ---------- Title-bar app menu (Windows custom frame only) ----------
+     The button (#appMenuBtn, before .brand where the macOS traffic-light
+     inset sat) opens the home page's own .menu with the same actions as the
+     hidden native menu — which stays the accelerator path, so shortcuts and
+     menu items cannot drift. Actions go through OV.menuAct (POST
+     /api/menu/:action → the shared `menu_action` in Rust); About renders a
+     sheet from GET /api/menu/about (the same strings the native dialog
+     shows). Shown only when OV.isCustomFrame(): macOS keeps its real menu
+     bar and never draws this. Labels rebuild on the language event like the
+     rest of the chrome, so they follow a language switch. */
+  (function appMenu() {
+    const btn = $("#appMenuBtn");
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    const items = () => [
+      {
+        label: th("menu.file.openProject"),
+        kbd: OV.shortcutKey("⌘O"),
+        act: () => !onboardingOpen() && openPicker(),
+      },
+      {
+        label: th("menu.file.showAllProjects"),
+        kbd: OV.shortcutKey("⇧⌘O"),
+        act: () => location.assign("/"),
+      },
+      {
+        label: th("menu.file.settings"),
+        kbd: OV.shortcutKey("⌘,"),
+        act: () => !onboardingOpen() && openSettings($("#settingsBtn"), settingsSection()),
+      },
+      {
+        label: th("menu.view.reload"),
+        kbd: OV.shortcutKey("⌘R"),
+        act: () => location.reload(),
+      },
+      { sep: 1 },
+      { label: th("menu.help.welcome"), act: () => openOnboarding(true) },
+      { label: th("menu.app.checkForUpdates"), act: () => window.ovHome.checkForUpdates() },
+      { label: th("menu.app.about"), act: aboutSheet },
+      { sep: 1 },
+      { label: th("menu.app.quit"), act: () => OV.menuAct("quit") },
+    ];
+    const open = () => {
+      if (btn.hidden) return;
+      const r = btn.getBoundingClientRect();
+      showMenu(items(), r.left, r.bottom + 4, btn, btn);
+    };
+    btn.addEventListener("click", open);
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        open();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenu(true);
+      }
+    });
+    window.addEventListener("ov-language", () => {
+      btn.setAttribute("aria-label", tr("menu.app.menu"));
+    });
+    /* About: the native dialog's strings (GET /api/menu/about) in the page's
+       own sheet, with the version line the macOS dialog prints. The link
+       opens through POST /api/open-external (same gate as every external
+       link), never a bare target=_blank. */
+    aboutSheetRef.current = aboutSheet;
+    function aboutSheet() {
+      OV.menuAbout()
+        .catch(() => ({}))
+        .then((info) => {
+          const name = info.name || "OpenVids";
+          const version = info.version || (window.OV_BOOT && window.OV_BOOT.version) || "";
+          const site = info.website || "https://openvids.ai";
+          const siteLabel = info.websiteLabel || site;
+          const comment = info.comment || "";
+          const credits = info.credits || "";
+          const { sh } = sheet(
+            "<h3>" +
+              esc(name) +
+              "</h3><p>" +
+              esc(tr("menu.app.version", { version })) +
+              (comment ? "<br>" + esc(comment) : "") +
+              (credits ? "<br>" + esc(credits) : "") +
+              '</p><p><button class="link" type="button" id="aboutSite">' +
+              esc(siteLabel) +
+              "</button></p>" +
+              '<div class="sheet-actions"><button class="btn btn-primary" type="button" data-cancel>' +
+              th("common.close") +
+              "</button></div>",
+          );
+          sh.querySelector("#aboutSite").onclick = () =>
+            api("/api/open-external", { url: site }).catch(() => {});
+          sh.querySelector("[data-cancel]").focus();
+        });
+    }
+  })();
+  /* ---------- Title-bar menu bar (Windows custom frame only) ----------
+     File Edit View Window Help between the mark and the brand, wearing the
+     toolbar's own button shape. The hidden native menu stays the accelerator
+     path (its Ctrl+ chords pump through TranslateAcceleratorW with no bar
+     attached); these dropdowns are the mouse + keyboard path through the same
+     OV.menuAct channel (POST /api/menu/:action to the shared menu_action in
+     Rust), so the two cannot drift. Once a menu is open, hovering another
+     label switches to it; Escape closes; Left/Right move between labels;
+     items stay keyboard reachable through the shared .menu component.
+     The mark button keeps the compact form (the single dropdown) for narrow
+     windows, where the labels hide. Shown only when OV.isCustomFrame():
+     macOS keeps its real menu bar and never draws this. */
+  (function menuBar() {
+    const bar = document.querySelector("#menuBar");
+    if (!bar || bar.dataset.wired) return;
+    bar.dataset.wired = "1";
+    const labels = () => [...bar.querySelectorAll(".menubar-item")];
+    let openLabel = null;
+    const isOpen = () => !!document.querySelector("#layer .menu");
+    /* File = the window + project rows; Edit acts on the focused field via
+       execCommand (the webview owns every field); View = reload; Window =
+       the caption verbs through the same IPC the buttons use; Help = the
+       onboarding / update / about sheets. About/Quit stay reachable through
+       the mark's compact menu too. */
+    const menuItems = (name) => {
+      if (name === "file")
+        return [
+          {
+            label: th("menu.file.openProject"),
+            kbd: OV.shortcutKey("⌘O"),
+            act: () => !onboardingOpen() && openPicker(),
+          },
+          {
+            label: th("menu.file.showAllProjects"),
+            kbd: OV.shortcutKey("⇧⌘O"),
+            act: () => location.assign("/"),
+          },
+          {
+            label: th("menu.file.settings"),
+            kbd: OV.shortcutKey("⌘,"),
+            act: () =>
+              !onboardingOpen() &&
+              openSettings(document.querySelector("#settingsBtn"), settingsSection()),
+          },
+          { sep: 1 },
+          { label: th("menu.app.quit"), act: () => OV.menuAct("quit") },
+        ];
+      if (name === "edit")
+        return [
+          {
+            label: th("menu.edit.undo"),
+            kbd: OV.shortcutKey("⌘Z"),
+            act: () => document.execCommand("undo"),
+          },
+          {
+            label: th("menu.edit.redo"),
+            kbd: OV.shortcutKey("⌘Y"),
+            act: () => document.execCommand("redo"),
+          },
+          { sep: 1 },
+          {
+            label: th("menu.edit.cut"),
+            kbd: OV.shortcutKey("⌘X"),
+            act: () => document.execCommand("cut"),
+          },
+          {
+            label: th("menu.edit.copy"),
+            kbd: OV.shortcutKey("⌘C"),
+            act: () => document.execCommand("copy"),
+          },
+          {
+            label: th("menu.edit.paste"),
+            kbd: OV.shortcutKey("⌘V"),
+            act: () => document.execCommand("paste"),
+          },
+          {
+            label: th("menu.edit.selectAll"),
+            kbd: OV.shortcutKey("⌘A"),
+            act: () => document.execCommand("selectAll"),
+          },
+        ];
+      if (name === "view")
+        return [
+          {
+            label: th("menu.view.reload"),
+            kbd: OV.shortcutKey("⌘R"),
+            act: () => location.reload(),
+          },
+        ];
+      if (name === "window")
+        return [
+          { label: th("menu.window.minimize"), act: () => OV.invoke("minimize") },
+          { label: th("menu.window.zoom"), act: () => OV.invoke("toggle_maximize") },
+          { label: th("menu.file.closeWindow"), act: () => OV.invoke("close") },
+        ];
+      return [
+        { label: th("menu.help.welcome"), act: () => openOnboarding(true) },
+        { label: th("menu.app.checkForUpdates"), act: () => window.ovHome.checkForUpdates() },
+        {
+          label: th("menu.app.about"),
+          act: () => aboutSheetRef.current && aboutSheetRef.current(),
+        },
+      ];
+    };
+    const open = (btn) => {
+      if (btn.hidden || bar.hidden) return;
+      const r = btn.getBoundingClientRect();
+      openLabel = btn.dataset.menu;
+      labels().forEach((el) => el.setAttribute("aria-expanded", el === btn ? "true" : "false"));
+      showMenu(menuItems(btn.dataset.menu), r.left, r.bottom + 4, btn, btn);
+    };
+    const close = () => {
+      openLabel = null;
+      labels().forEach((el) => el.setAttribute("aria-expanded", "false"));
+      closeMenu(true);
+    };
+    labels().forEach((btn) => {
+      btn.addEventListener("click", () => (openLabel === btn.dataset.menu ? close() : open(btn)));
+      /* Once one menu is open, hovering another label switches to it. */
+      btn.addEventListener("mouseover", () => {
+        if (openLabel && openLabel !== btn.dataset.menu && isOpen()) open(btn);
+      });
+      /* stopPropagation: the document-global shortcut handler must not see
+         label keys (Enter would open the selected project behind the menu).
+         Escape falls through to closeMenu(true), which restores focus. */
+      btn.addEventListener("keydown", (e) => {
+        const order = labels();
+        const i = order.indexOf(btn);
+        if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          open(btn);
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          e.stopPropagation();
+          const next = order[(i + 1) % order.length];
+          next.focus();
+          if (openLabel) open(next);
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          e.stopPropagation();
+          const prev = order[(i - 1 + order.length) % order.length];
+          prev.focus();
+          if (openLabel) open(prev);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          close();
+        }
+      });
+    });
+    /* Escape from inside an open menu closes the bar too. */
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && openLabel && isOpen()) close();
+    });
+    window.addEventListener("ov-language", () => {
+      if (openLabel) close();
+    });
+  })();
 })();

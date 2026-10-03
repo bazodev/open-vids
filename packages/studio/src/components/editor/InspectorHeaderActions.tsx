@@ -1,6 +1,7 @@
 import { Eye, EyeSlash } from "@phosphor-icons/react";
 import { X } from "../../icons/SystemIcons";
 import { useTranslation } from "../../i18n";
+import { resolveShortcutKey } from "../../utils/platform";
 import type { DomEditSelection } from "./domEditingTypes";
 
 /** The action buttons in the inspector header: visibility, Ungroup (groups only), copy, clear. */
@@ -51,7 +52,7 @@ export function InspectorHeaderActions({
           onClick={() => {
             onUngroup();
           }}
-          title={t("editor.inspector.ungroupTitle", { shortcut: "⌘⇧G" })}
+          title={t("editor.inspector.ungroupTitle", { shortcut: resolveShortcutKey("⌘⇧G") })}
           className="flex h-6 items-center rounded-sm px-2 text-sm font-medium text-fg-2 transition-colors hover:bg-surface-2 hover:text-fg"
         >
           {t("editor.inspector.ungroup")}

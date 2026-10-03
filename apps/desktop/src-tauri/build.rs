@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 fn main() {
     tauri_build::build();
-
+    embed_common_controls_manifest();
     let manifest_dir = PathBuf::from(
         env::var("CARGO_MANIFEST_DIR").expect("cargo always sets CARGO_MANIFEST_DIR"),
     );
@@ -82,6 +82,52 @@ fn main() {
         PathBuf::from(env::var("OUT_DIR").expect("cargo always sets OUT_DIR")).join("locales.rs");
     fs::write(&generated, out)
         .unwrap_or_else(|err| panic!("i18n: cannot write {}: {err}", generated.display()));
+}
+
+/// Link Common Controls 6 into every Windows binary of this crate (including
+/// the unit-test executable, which links the same GUI libraries as the app).
+///
+/// `rfd` shows its dialogs through `TaskDialogIndirect`, which only exists in
+/// version 6; without the dependency the loader refuses the binary with
+/// `STATUS_ENTRYPOINT_NOT_FOUND` before a single test runs. This is the same
+/// manifest `tauri-build` embeds by default, so the real binary is unaffected
+/// (identical bytes would merge, not collide). macOS/Linux link nothing.
+fn embed_common_controls_manifest() {
+    // MSVC-linker syntax; the GNU toolchain would choke on it.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
+        || env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc")
+    {
+        return;
+    }
+    let manifest = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*" />
+    </dependentAssembly>
+  </dependency>
+</assembly>
+"#;
+    let out = PathBuf::from(env::var("OUT_DIR").expect("cargo always sets OUT_DIR"));
+    let path = out.join("openvids-common-controls.manifest");
+    fs::write(&path, manifest).expect("cannot write the Common Controls manifest");
+    // rust-lld (the self-contained MSVC linker) understands the MSVC flags.
+    // The manifest must reach every test/cdylib link (the unit-test
+    // executable links the same GUI libraries as the app; without it the
+    // loader refuses the binary with `STATUS_ENTRYPOINT_NOT_FOUND` before a
+    // single test runs), but the real binary gets its manifest from
+    // `tauri-build`'s resource file (a second MANIFEST resource collides with
+    // it, CVT1100), so the bin link switches back to rustc's default
+    // `/MANIFEST:NO` — which makes the linker report `LNK4075:
+    // /MANIFESTINPUT ignored` for that link only. There is no clean silence:
+    // cargo has `rustc-link-arg-bins` (plural) but no per-target way to say
+    // "tests but not bins" (`rustc-link-arg-tests` errors when the package
+    // has no `[[test]]` target, as here — the lib's unit tests ride the lib
+    // target — and `-bins` with `=` takes only a bin name for a single bin),
+    // so the warning is the accepted trade.
+    println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", path.display());
+    println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
 }
 
 /// What a `code` from `locales/index.json` may look like: a plain file stem.

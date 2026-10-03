@@ -63,16 +63,16 @@ Use real material (public-domain / CC0 test media, never private user files) and
 
 - [ ] Stop during an edit, a render, an analysis job, an import and render QA: the turn ends `aborted`, the
       checkpoint closes after every write, nothing lands in the next turn.
-- [ ] SIGKILL the agent runtime mid-turn: the turn becomes `interrupted`, its checkpoint is recovered, Revert works.
-- [ ] SIGKILL the Studio server mid-render / mid-analysis: after restart no `renders/work-*` or transaction temp
+- [ ] SIGKILL the agent runtime mid-turn (macOS/Linux; on Windows kill the runtime tree from Task Manager): the turn becomes `interrupted`, its checkpoint is recovered, Revert works.
+- [ ] SIGKILL the Studio server mid-render / mid-analysis (macOS/Linux; on Windows kill the sidecar tree from Task Manager): after restart no `renders/work-*` or transaction temp
       files, no orphan Chrome/ffmpeg/whisper, history intact.
 - [ ] Revert a turn: files restored; QA reports kept and marked outdated; analysis cache still fresh; story
       graph/sync/provenance consistent.
 - [ ] Full app restart: chats, turns (incl. Render QA cards and interim notes), reports, story and analysis intact.
 - [ ] Damaged `.hyperframes` files (chat log tail, story graph, QA report, provenance, `hyperframes.json`) do not
       crash the server or the runtime.
-- [ ] After quitting the app (menu and ⌘Q), no OpenVids, Studio server, agent runtime, Chrome, ffmpeg or whisper
-      process is left (`ps -axo pid,ppid,command`).
+- [ ] After quitting the app (menu and ⌘Q / Alt+F4), no OpenVids, Studio server, agent runtime, Chrome, ffmpeg or whisper
+      process is left (macOS/Linux: `ps -axo pid,ppid,command`; Windows: Task Manager / `tasklist`).
 
 ## 5. Security (gate)
 
@@ -92,19 +92,26 @@ Use real material (public-domain / CC0 test media, never private user files) and
       and GPU processes and compare with the known deadlock signature
       (`RemoteAudioSession::tryToSetActive` ↔ `AVAssetResourceLoader dealloc`).
 
-## 7. Packaged app and DMG (gate)
+## 7. Packaged app: DMG + NSIS installer (gate)
 
 ```bash
 bun run desktop:build
+# macOS:
 hdiutil attach apps/desktop/src-tauri/target/release/bundle/dmg/OpenVids_*_aarch64.dmg
+# Windows (from the release job or a Windows build machine):
+# apps/desktop/src-tauri/target/release/bundle/nsis/OpenVids_*_x64-setup.exe
 ```
 
-- [ ] The DMG mounts, contains `OpenVids.app` and the Applications link; the app copied from it launches.
-- [ ] `codesign --verify --deep --strict OpenVids.app` passes (the bundle is ad-hoc signed by default,
+- [ ] macOS: the DMG mounts, contains `OpenVids.app` and the Applications link; the app copied from it launches.
+- [ ] macOS: `codesign --verify --deep --strict OpenVids.app` passes (the bundle is ad-hoc signed by default,
       `signingIdentity: "-"`). A public download additionally needs a Developer ID build
       (`APPLE_SIGNING_IDENTITY`) and notarization (`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`); record
       `spctl -a -vv` (`rejected` for ad-hoc builds, `accepted … Notarized Developer ID` for a public one).
-- [ ] Home → create a new project → open it → chat turn → Render QA card → Export → quit.
+- [ ] Windows: the NSIS `OpenVids_<v>_x64-setup.exe` installs per-user, bootstraps WebView2 if needed, and the installed app launches (accept the SmartScreen unknown-publisher warning: the build is not code-signed).
+- First Windows release: publish the draft so `latest.json` exists at the updater's `latest/download` URL, then check Settings → General → Check for updates from an older installed build.
+- [ ] Windows: `latest.json` carries the `windows-x86_64` platform entry (signature + URL) next to `darwin-aarch64`; the in-app update downloads the setup, verifies the signature, and runs the passive install.
+- [ ] Windows clean-machine checks: install → launch → System check finds Chrome/FFmpeg (or the FFmpeg download button installs the gyan.dev build into `%USERPROFILE%\.openvids\ffmpeg` with byte progress) → Home → create a new project → open it → chat turn → Render QA card → Export → quit leaves no `bun.exe`, Chrome or ffmpeg behind in Task Manager.
+- [ ] macOS clean-machine check: Home → create a new project → open it → chat turn → Render QA card → Export → quit.
 
 ## 8. Documentation
 

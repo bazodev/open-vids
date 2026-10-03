@@ -34,6 +34,7 @@ type SpawnPreview = (
     detached: boolean;
     stdio: ["ignore", number, number];
     env: NodeJS.ProcessEnv;
+    windowsHide?: boolean;
   },
 ) => SpawnResult;
 
@@ -213,6 +214,9 @@ function spawnDetachedPreview(
         detached: true,
         stdio: ["ignore", logFd, logFd],
         env: process.env,
+        // A GUI-launched preview has no console; without this the detached
+        // wrapper flashes one on Windows. No-op on POSIX.
+        windowsHide: true,
       },
     );
   } finally {

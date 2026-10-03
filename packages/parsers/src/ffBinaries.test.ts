@@ -52,7 +52,9 @@ describe("findFfBinary", () => {
     vi.resetModules();
     vi.doMock("node:fs", () => {
       const mocked = {
-        existsSync: (candidate: unknown) => candidate === "/tools/ffmpeg.exe",
+        // `join` emits `\` separators on Windows, so compare separator-blind.
+        existsSync: (candidate: unknown) =>
+          typeof candidate === "string" && candidate.replace(/\\/g, "/") === "/tools/ffmpeg.exe",
         accessSync: () => {},
         constants: { X_OK: 1 },
       };
@@ -60,7 +62,9 @@ describe("findFfBinary", () => {
     });
     const { findFfBinary } = await importFresh();
 
-    expect(findFfBinary("ffmpeg")).toBe("/tools/ffmpeg.exe");
+    // `findFfBinary` returns the resolved absolute path (`resolve` is a no-op
+    // for it on POSIX; on Windows it prepends the drive letter).
+    expect(findFfBinary("ffmpeg")).toBe(resolve(join("/tools", "ffmpeg.exe")));
   });
 
   it("discovers a Windows binary in a Unicode current directory without decoding console output", async () => {
@@ -107,7 +111,10 @@ describe("findFfBinary", () => {
       const { findFfBinary } = await importFresh();
 
       expect(findFfBinary("ffmpeg")).toBe(resolve(ffmpegPath));
-      expect(execFileSync).toHaveBeenCalledOnce();
+      // On Windows resolution enumerates PATH from Node directly and never
+      // spawns a lookup command; on POSIX the `which` attempt runs first.
+      if (process.platform === "win32") expect(execFileSync).not.toHaveBeenCalled();
+      else expect(execFileSync).toHaveBeenCalledOnce();
     } finally {
       rmSync(binDir, { force: true, recursive: true });
     }

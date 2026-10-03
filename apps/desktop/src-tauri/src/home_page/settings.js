@@ -28,6 +28,7 @@
   const closeBtn = document.querySelector("button.tl.close");
   closeBtn.innerHTML = ic("x");
   closeBtn.onclick = close;
+  OV.applyCaptionFrame(document);
   document.body.addEventListener("mousedown", (e) => {
     if (e.target === document.body) close();
   });
@@ -35,7 +36,7 @@
     if (e.key === "Escape" && !e.defaultPrevented) {
       e.preventDefault();
       close();
-    } else if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === "w" || e.key === ",")) {
+    } else if ((e.metaKey || e.ctrlKey) && (OV.matchesKey(e, "w") || OV.matchesKey(e, ","))) {
       e.preventDefault();
       close();
     }

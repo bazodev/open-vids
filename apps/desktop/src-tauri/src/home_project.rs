@@ -14,11 +14,13 @@
 //! without a `meta.json` are unaffected.
 //!
 //! Trash moves the folder to the OS Trash via the `trash` crate's
-//! `NsFileManager` backend (`trashItemAtURL`) and drops the recent.
-//! NsFileManager — not the crate's default Finder AppleScript, which shells
-//! out to `osascript` and hangs without a GUI session — is load-bearing here;
-//! verified live against the running app (see README Security notes).
-
+//! `NsFileManager` backend (`trashItemAtURL`) on macOS and the crate default
+//! elsewhere — on Windows that is the Recycle Bin via `IFileOperation`
+//! (verified in the `trash` 5.x sources, `src/windows.rs`) — and drops the
+//! recent. NsFileManager — not the crate's default Finder AppleScript, which
+//! shells out to `osascript` and hangs without a GUI session — is load-bearing
+//! on macOS; verified live against the running app (see README Security
+//! notes).
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -168,7 +170,7 @@ pub fn handle_trash(stream: &mut TcpStream, state: &Arc<Mutex<HomeInner>>, body:
     // to answer it (observed: the request never returns under `tauri dev`),
     // while `trashItemAtURL` is synchronous and needs no extra permissions.
     // Trade-off: no Finder "Put Back" undo entry. Other platforms keep the
-    // crate default.
+    // crate default (Recycle Bin via `IFileOperation` on Windows).
     #[cfg(target_os = "macos")]
     let trash_result: Result<(), trash::Error> = {
         let mut ctx = trash::TrashContext::new();

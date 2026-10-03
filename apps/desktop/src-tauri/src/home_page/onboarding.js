@@ -137,8 +137,15 @@
   }
   function lock(on) {
     const win = document.getElementById("win");
-    for (const el of win.children)
-      if (el !== overlay && el.id !== "launch" && el.tagName !== "SCRIPT") el.inert = on;
+    for (const el of win.children) {
+      if (el === overlay || el.id === "launch" || el.tagName === "SCRIPT") continue;
+      // The custom frame's window buttons stay usable under the lock.
+      if (el.classList.contains("titlebar")) {
+        for (const part of el.children) if (part.id !== "winControls") part.inert = on;
+        continue;
+      }
+      el.inert = on;
+    }
   }
   function close(finished) {
     if (!OB.open) return;
@@ -178,7 +185,7 @@
   overlay.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.metaKey || e.ctrlKey) {
-      if (e.key.toLowerCase() === "w" || e.key === ",") e.preventDefault();
+      if (OV.matchesKey(e, "w") || OV.matchesKey(e, ",")) e.preventDefault();
       return;
     }
     if (e.key === "Escape") {

@@ -86,6 +86,10 @@ function closeServer(server) {
   });
 }
 
+// The fake `heygen` CLI is a POSIX shebang stub on PATH; CreateProcess cannot
+// exec it on Windows (and chmod +x is a no-op), so every test going through
+// withFakeHeygen is POSIX-only. The symlink-collision case is covered there too.
+const winSkip = process.platform === "win32" ? { skip: true } : {};
 async function withFakeHeygen(options, run) {
   const dir = mkdtempSync(join(tmpdir(), "media-use-heygen-video-provider-"));
   const capturePath = join(dir, "argv.log");
@@ -152,54 +156,61 @@ function bodyFromInvocation(invocation) {
   return JSON.parse(invocation.slice(start + marker.length));
 }
 
-test("downloads a generated avatar video and returns the generated MP4 result", async (t) => {
-  const { server, url } = await listenVideoServer(t);
-  let localPath;
-  try {
-    await withFakeHeygen(
-      { response: JSON.stringify({ data: { video_url: url } }) },
-      async ({ invocations }) => {
-        const heygenVideoGenerate = await freshGenerate();
-        const intent = "Welcome to the HyperFrames launch";
-        const result = await heygenVideoGenerate(intent, {});
-        localPath = result?.localPath;
-        const calls = invocations();
-        const create = calls.find((call) => call.includes("video create"));
+test(
+  "downloads a generated avatar video and returns the generated MP4 result",
+  winSkip,
+  async (t) => {
+    const { server, url } = await listenVideoServer(t);
+    let localPath;
+    try {
+      await withFakeHeygen(
+        { response: JSON.stringify({ data: { video_url: url } }) },
+        async ({ invocations }) => {
+          const heygenVideoGenerate = await freshGenerate();
+          const intent = "Welcome to the HyperFrames launch";
+          const result = await heygenVideoGenerate(intent, {});
+          localPath = result?.localPath;
+          const calls = invocations();
+          const create = calls.find((call) => call.includes("video create"));
 
-        assert.ok(create);
-        assert.match(create, /--headers X-HeyGen-Client-Source: media-use/);
-        assert.deepEqual(bodyFromInvocation(create), {
-          type: "avatar",
-          avatar_id: "avatar-public-1",
-          script: intent,
-          voice_id: "voice-starfish-1",
-        });
-        assert.ok(result);
-        assert.equal(join(tmpdir(), result.localPath.slice(tmpdir().length + 1)), result.localPath);
-        assert.match(result.localPath, /media-use-heygen-video-[^/\\]+[/\\]video\.mp4$/);
-        if (process.platform !== "win32") {
-          assert.equal(statSync(dirname(result.localPath)).mode & 0o777, 0o700);
-        }
-        assert.deepEqual(result, {
-          localPath: result.localPath,
-          ext: ".mp4",
-          source: "generated",
-          metadata: {
-            description: intent,
-            provider: "heygen.video",
-            provenance: { prompt: intent },
-          },
-        });
-        assert.deepEqual(readFileSync(result.localPath), VIDEO_FIXTURE);
-      },
-    );
-  } finally {
-    if (localPath) cleanupDownload(localPath);
-    await closeServer(server);
-  }
-});
+          assert.ok(create);
+          assert.match(create, /--headers X-HeyGen-Client-Source: media-use/);
+          assert.deepEqual(bodyFromInvocation(create), {
+            type: "avatar",
+            avatar_id: "avatar-public-1",
+            script: intent,
+            voice_id: "voice-starfish-1",
+          });
+          assert.ok(result);
+          assert.equal(
+            join(tmpdir(), result.localPath.slice(tmpdir().length + 1)),
+            result.localPath,
+          );
+          assert.match(result.localPath, /media-use-heygen-video-[^/\\]+[/\\]video\.mp4$/);
+          if (process.platform !== "win32") {
+            assert.equal(statSync(dirname(result.localPath)).mode & 0o777, 0o700);
+          }
+          assert.deepEqual(result, {
+            localPath: result.localPath,
+            ext: ".mp4",
+            source: "generated",
+            metadata: {
+              description: intent,
+              provider: "heygen.video",
+              provenance: { prompt: intent },
+            },
+          });
+          assert.deepEqual(readFileSync(result.localPath), VIDEO_FIXTURE);
+        },
+      );
+    } finally {
+      if (localPath) cleanupDownload(localPath);
+      await closeServer(server);
+    }
+  },
+);
 
-test("tags video creation but not avatar or voice discovery", async (t) => {
+test("tags video creation but not avatar or voice discovery", winSkip, async (t) => {
   const { server, url } = await listenVideoServer(t);
   let localPath;
   try {
@@ -226,7 +237,7 @@ test("tags video creation but not avatar or voice discovery", async (t) => {
   }
 });
 
-test("uses explicit avatar and voice overrides without discovery", async (t) => {
+test("uses explicit avatar and voice overrides without discovery", winSkip, async (t) => {
   const { server, url } = await listenVideoServer(t);
   let localPath;
   try {
@@ -257,7 +268,7 @@ test("uses explicit avatar and voice overrides without discovery", async (t) => 
   }
 });
 
-test("caches discovered avatar and voice IDs for the process", async (t) => {
+test("caches discovered avatar and voice IDs for the process", winSkip, async (t) => {
   const { server, url } = await listenVideoServer(t);
   const localPaths = new Set();
   try {
@@ -282,7 +293,7 @@ test("caches discovered avatar and voice IDs for the process", async (t) => {
   }
 });
 
-test("prints auth onboarding and reports an unauthenticated create failure", async (t) => {
+test("prints auth onboarding and reports an unauthenticated create failure", winSkip, async (t) => {
   const errors = [];
   t.mock.method(console, "error", (message) => errors.push(message));
 
@@ -299,7 +310,7 @@ test("prints auth onboarding and reports an unauthenticated create failure", asy
   });
 });
 
-test("reports other create failures without auth onboarding", async (t) => {
+test("reports other create failures without auth onboarding", winSkip, async (t) => {
   const errors = [];
   t.mock.method(console, "error", (message) => errors.push(message));
 
@@ -332,30 +343,34 @@ test("falls through on non-JSON and error responses", async (t) => {
   }
 });
 
-test("onboards and returns null when avatar/voice discovery itself is unauthenticated", async (t) => {
-  const errors = [];
-  t.mock.method(console, "error", (message) => errors.push(message));
+test(
+  "onboards and returns null when avatar/voice discovery itself is unauthenticated",
+  winSkip,
+  async (t) => {
+    const errors = [];
+    t.mock.method(console, "error", (message) => errors.push(message));
 
-  // Both avatar list AND voice list would fail unauthenticated (discoveryMode
-  // "auth" applies to both in the fake CLI) -- the short-circuit after the
-  // first failure must mean only one is ever attempted, so the onboarding
-  // message fires exactly once instead of double-firing for what's really one
-  // auth failure.
-  await withFakeHeygen({ discoveryMode: "auth" }, async ({ invocations }) => {
-    const heygenVideoGenerate = await freshGenerate();
-    const result = await heygenVideoGenerate("Discovery auth failure", {});
+    // Both avatar list AND voice list would fail unauthenticated (discoveryMode
+    // "auth" applies to both in the fake CLI) -- the short-circuit after the
+    // first failure must mean only one is ever attempted, so the onboarding
+    // message fires exactly once instead of double-firing for what's really one
+    // auth failure.
+    await withFakeHeygen({ discoveryMode: "auth" }, async ({ invocations }) => {
+      const heygenVideoGenerate = await freshGenerate();
+      const result = await heygenVideoGenerate("Discovery auth failure", {});
 
-    assert.equal(result, null);
-    assert.equal(
-      errors.filter((message) => message === AVATAR_VIDEO_SIGNIN_MESSAGE).length,
-      1,
-      "onboarding message must fire exactly once, not once per failed discovery call",
-    );
-    const calls = invocations();
-    assert.equal(calls.length, 1, "must short-circuit after the first discovery failure");
-    assert.match(calls[0], /^avatar list /);
-  });
-});
+      assert.equal(result, null);
+      assert.equal(
+        errors.filter((message) => message === AVATAR_VIDEO_SIGNIN_MESSAGE).length,
+        1,
+        "onboarding message must fire exactly once, not once per failed discovery call",
+      );
+      const calls = invocations();
+      assert.equal(calls.length, 1, "must short-circuit after the first discovery failure");
+      assert.match(calls[0], /^avatar list /);
+    });
+  },
+);
 
 test("download failure after a successful create returns null and logs a diagnostic", async (t) => {
   const { server, url } = await listenFailingVideoServer(t);
@@ -374,39 +389,43 @@ test("download failure after a successful create returns null and logs a diagnos
   }
 });
 
-test("uses private unique downloads even when time is fixed and the old name is planted", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "hf-video-temp-test-"));
-  const previousTmpdir = process.env.TMPDIR;
-  process.env.TMPDIR = root;
-  t.mock.method(Date, "now", () => 123456);
-  t.mock.method(globalThis, "fetch", async () => ({
-    ok: true,
-    headers: { get: () => "4" },
-    body: [Buffer.from("new!")],
-  }));
-  try {
-    const victim = join(root, "victim");
-    writeFileSync(victim, "unchanged");
-    symlinkSync(victim, join(root, `media-use-heygen-video-${process.pid}-123456.mp4`));
-    await withFakeHeygen(
-      { response: JSON.stringify({ data: { video_url: "https://example.invalid/video.mp4" } }) },
-      async () => {
-        const generate = await freshGenerate();
-        const first = await generate("First", { avatarId: "a", voiceId: "v" });
-        const second = await generate("Second", { avatarId: "a", voiceId: "v" });
-        assert.ok(first && second);
-        assert.notEqual(first.localPath, second.localPath);
-        assert.equal(readFileSync(first.localPath, "utf8"), "new!");
-        assert.equal(readFileSync(second.localPath, "utf8"), "new!");
-        assert.equal(readFileSync(victim, "utf8"), "unchanged");
-      },
-    );
-  } finally {
-    if (previousTmpdir === undefined) delete process.env.TMPDIR;
-    else process.env.TMPDIR = previousTmpdir;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+test(
+  "uses private unique downloads even when time is fixed and the old name is planted",
+  winSkip,
+  async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "hf-video-temp-test-"));
+    const previousTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = root;
+    t.mock.method(Date, "now", () => 123456);
+    t.mock.method(globalThis, "fetch", async () => ({
+      ok: true,
+      headers: { get: () => "4" },
+      body: [Buffer.from("new!")],
+    }));
+    try {
+      const victim = join(root, "victim");
+      writeFileSync(victim, "unchanged");
+      symlinkSync(victim, join(root, `media-use-heygen-video-${process.pid}-123456.mp4`));
+      await withFakeHeygen(
+        { response: JSON.stringify({ data: { video_url: "https://example.invalid/video.mp4" } }) },
+        async () => {
+          const generate = await freshGenerate();
+          const first = await generate("First", { avatarId: "a", voiceId: "v" });
+          const second = await generate("Second", { avatarId: "a", voiceId: "v" });
+          assert.ok(first && second);
+          assert.notEqual(first.localPath, second.localPath);
+          assert.equal(readFileSync(first.localPath, "utf8"), "new!");
+          assert.equal(readFileSync(second.localPath, "utf8"), "new!");
+          assert.equal(readFileSync(victim, "utf8"), "unchanged");
+        },
+      );
+    } finally {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("removes private download staging on failure while returning null", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "hf-video-temp-fail-"));

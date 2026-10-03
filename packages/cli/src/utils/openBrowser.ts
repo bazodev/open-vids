@@ -81,6 +81,9 @@ export function openBrowser(url: string, options: OpenBrowserOptions = {}): void
     const child = spawn(options.browserPath, args, {
       detached: true,
       stdio: "ignore",
+      // A GUI-launched browser has no console; without this it flashes one
+      // on Windows. No-op on POSIX.
+      windowsHide: true,
     });
     child.on("error", () => {});
     child.unref();

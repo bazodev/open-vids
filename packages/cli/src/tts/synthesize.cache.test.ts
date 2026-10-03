@@ -68,17 +68,44 @@ describe("synthesis script cache", () => {
     expect(fs.readFileSync(scriptPath, "utf-8")).toBe("existing current script");
   });
 
-  it.each(["concurrent file", "dangling symlink"])(
-    "preserves a %s at publication",
-    async (kind) => {
+  it("preserves a concurrent file at publication", async () => {
+    const original = await vi.importActual<typeof fs>("node:fs");
+    let injected = false;
+    vi.mocked(fs.existsSync).mockImplementation((path) => {
+      if (path === scriptPath && !injected) {
+        injected = true;
+        fs.writeFileSync(scriptPath, "concurrent script");
+        return false;
+      }
+      return original.existsSync(path);
+    });
+    try {
+      const { synthesize } = await import("./synthesize.js");
+      await synthesize("Hello", outputPath);
+      expect(injected).toBe(true);
+      expect(fs.readFileSync(scriptPath, "utf-8")).toBe("concurrent script");
+      expect(execFileSync).toHaveBeenCalledWith(
+        "test-python",
+        expect.arrayContaining([scriptPath, "model.onnx", "voices.bin", "Hello", outputPath]),
+        expect.objectContaining({ timeout: 300_000 }),
+      );
+    } finally {
+      vi.mocked(fs.existsSync).mockImplementation(original.existsSync);
+    }
+  });
+
+  // The dangling-symlink race fixture needs elevation / Developer Mode on
+  // Windows (EPERM without it) — skip there; POSIX still guards this path.
+  it.skipIf(process.platform === "win32")(
+    "preserves a dangling symlink at publication",
+    async () => {
       const target = join(paths.home, "missing.py");
       const original = await vi.importActual<typeof fs>("node:fs");
       let injected = false;
       vi.mocked(fs.existsSync).mockImplementation((path) => {
         if (path === scriptPath && !injected) {
           injected = true;
-          if (kind === "dangling symlink") fs.symlinkSync(target, scriptPath);
-          else fs.writeFileSync(scriptPath, "concurrent script");
+          fs.symlinkSync(target, scriptPath);
           return false;
         }
         return original.existsSync(path);
@@ -87,12 +114,8 @@ describe("synthesis script cache", () => {
         const { synthesize } = await import("./synthesize.js");
         await synthesize("Hello", outputPath);
         expect(injected).toBe(true);
-        if (kind === "dangling symlink") {
-          expect(fs.lstatSync(scriptPath).isSymbolicLink()).toBe(true);
-          expect(fs.existsSync(target)).toBe(false);
-        } else {
-          expect(fs.readFileSync(scriptPath, "utf-8")).toBe("concurrent script");
-        }
+        expect(fs.lstatSync(scriptPath).isSymbolicLink()).toBe(true);
+        expect(fs.existsSync(target)).toBe(false);
         expect(execFileSync).toHaveBeenCalledWith(
           "test-python",
           expect.arrayContaining([scriptPath, "model.onnx", "voices.bin", "Hello", outputPath]),

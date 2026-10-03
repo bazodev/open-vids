@@ -29,7 +29,8 @@ describe("structure rules on the shipped catalog and skills", () => {
     const hits: string[] = [];
     let roots = 0;
     for (const file of files) {
-      const isRoot = file.endsWith("/index.html");
+      // `join` yields `\` separators on Windows, so match either separator.
+      const isRoot = /(^|[\\/])index\.html$/.test(file);
       roots += isRoot ? 1 : 0;
       const { findings } = await lintHyperframeHtml(readFileSync(file, "utf8"), {
         host: "studio",

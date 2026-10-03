@@ -70,7 +70,7 @@ impl RecentsStore {
         let mut seen: Vec<PathBuf> = Vec::new();
         self.entries.retain(|e| {
             let key = canonical_key(&e.dir);
-            if seen.contains(&key) {
+            if seen.iter().any(|s| super::platform::same_path(s, &key)) {
                 return false;
             }
             seen.push(key);
@@ -83,13 +83,12 @@ impl RecentsStore {
     /// Record an open: move the entry to the front, updating metadata.
     /// A previously cached thumbnail survives the re-record.
     pub fn record(&mut self, id: &str, dir: &Path, width: Option<u32>, height: Option<u32>) {
-        let key = canonical_key(dir);
         let thumb = self
             .entries
             .iter()
-            .find(|e| canonical_key(&e.dir) == key)
+            .find(|e| same_dir(&e.dir, dir))
             .and_then(|e| e.thumb.clone());
-        self.entries.retain(|e| canonical_key(&e.dir) != key);
+        self.entries.retain(|e| !same_dir(&e.dir, dir));
         self.entries.insert(
             0,
             RecentEntry {
@@ -112,12 +111,7 @@ impl RecentsStore {
         width: Option<u32>,
         height: Option<u32>,
     ) {
-        let key = canonical_key(dir);
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|e| canonical_key(&e.dir) == key)
-        {
+        if let Some(entry) = self.entries.iter_mut().find(|e| same_dir(&e.dir, dir)) {
             if thumb.is_some() {
                 entry.thumb = thumb;
             }
@@ -171,8 +165,7 @@ impl RecentsStore {
     /// Put a taken entry back (Undo of Remove from Recent). Its timestamp is
     /// kept, so it lands where it was; a later record of the same folder wins.
     pub fn restore(&mut self, entry: RecentEntry) {
-        let key = canonical_key(&entry.dir);
-        if self.entries.iter().any(|e| canonical_key(&e.dir) == key) {
+        if self.entries.iter().any(|e| same_dir(&e.dir, &entry.dir)) {
             return;
         }
         self.entries.push(entry);
@@ -189,7 +182,7 @@ impl RecentsStore {
             return false;
         };
         let mut entry = self.entries.remove(index);
-        self.entries.retain(|e| canonical_key(&e.dir) != key);
+        self.entries.retain(|e| !same_dir(&e.dir, new_dir));
         entry.id = new_id.to_string();
         entry.dir = key;
         let at = index.min(self.entries.len());
@@ -207,11 +200,17 @@ fn now_secs() -> u64 {
 }
 
 fn canonical_key(dir: &Path) -> PathBuf {
-    dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf())
+    super::platform::canonical_stable(dir)
 }
 
 fn key_as_path(dir: &Path) -> PathBuf {
     canonical_key(dir)
+}
+
+/// Whether two stored dirs name the same folder. On Windows the filesystem is
+/// case-insensitive, so `C:\Work\X` and `c:\work\x` dedupe to one recent.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    super::platform::same_path(&canonical_key(a), &canonical_key(b))
 }
 
 #[cfg(test)]
@@ -228,7 +227,7 @@ mod tests {
     fn proj(base: &Path, name: &str) -> PathBuf {
         let dir = base.join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        dir.canonicalize().unwrap_or(dir)
+        super::super::platform::canonical_stable(&dir)
     }
 
     #[test]
@@ -256,6 +255,20 @@ mod tests {
         assert_eq!(store.entries().len(), 1);
         assert_eq!(store.entries()[0].id, "a-renamed");
         assert_eq!(store.entries()[0].width, Some(1080));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn record_dedupes_case_variants_of_the_same_folder() {
+        let base = tmp("case");
+        let store_path = base.join("recents.json");
+        let mut store = RecentsStore::load(&store_path);
+        let dir = proj(&base, "Project");
+        store.record("a", &dir, None, None);
+        let upper = PathBuf::from(dir.to_string_lossy().to_uppercase());
+        store.record("b", &upper, None, None);
+        assert_eq!(store.entries().len(), 1);
+        assert_eq!(store.entries()[0].id, "b");
     }
 
     #[test]

@@ -163,7 +163,7 @@
         j.apiKeyConfigured
           ? `<button type="button" class="btn btn-ghost" data-act="jev-replace-cancel" data-fk="jev-replace-cancel">${te("common.cancel")}</button>`
           : ""
-      }</div>${err ? `<p class="st-field-err" id="err-jev" role="alert">${esc(text(err))}</p>` : ""}<p class="st-foot">${te("settings.key.foot")}</p></div>`
+      }</div>${err ? `<p class="st-field-err" id="err-jev" role="alert">${esc(text(err))}</p>` : ""}<p class="st-foot">${esc(OV.pt("settings.key.foot"))}</p></div>`
     );
   }
 

@@ -23,7 +23,8 @@ html.is-onboarding .ob {
   --row-py: 3px;
 }
 /* The Projects toolbar is unreachable while the setup is up: hide it rather than show dead controls. */
-html.is-onboarding .tb-tools {
+html.is-onboarding #tb-tools,
+html.is-onboarding #tb-new {
   visibility: hidden;
 }
 #obMain {

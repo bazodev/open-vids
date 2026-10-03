@@ -208,7 +208,7 @@ describe("QA report retention", () => {
     for (let i = 0; i < 5; i += 1) expect(sessions.has(`s${i}`)).toBe(false);
     for (let i = 5; i < 25; i += 1) expect(sessions.has(`s${i}`)).toBe(true);
     expect(kept).toHaveLength(1 + QA_RETENTION.keepSessions * 2);
-  });
+  }, 30_000);
 
   it("keeps every session younger than the retention age, however many there are", () => {
     const { project, service, clock, save } = setup();

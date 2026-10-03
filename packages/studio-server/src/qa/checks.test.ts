@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STORY_GRAPH_SCHEMA } from "@hyperframes/agent-protocol";
@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import type { LayoutCheckFinding, StudioApiAdapter } from "../types.js";
 import { QaFailure } from "./errors.js";
 import { QaService, type QaAnalysis } from "./service.js";
+import { writeHangExe } from "../helpers/fakeFfmpeg.js";
 import {
   RENDERS,
   composition,
@@ -842,11 +843,13 @@ run("layout check", () => {
 run("cancellation", () => {
   it("kills ffmpeg and stops the layout checker when the request is aborted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openvids-qa-hang-"));
+    const exeDir = mkdtempSync(join(tmpdir(), "openvids-qa-fake-"));
     try {
       const pidFile = join(dir, "pid");
-      const hang = join(dir, "ffmpeg");
-      writeFileSync(hang, `#!/bin/sh\necho $$ >> "${pidFile}"\nexec sleep 60\n`);
-      chmodSync(hang, 0o755);
+      // A `.sh` stand-in cannot exec on Windows (`spawn EFTYPE`): compiled
+      // exe there (see helpers/fakeFfmpeg.ts), kept outside `dir` since
+      // Windows locks a running exe's image file against cleanup.
+      const hang = await writeHangExe(exeDir, pidFile);
       let layoutAborted = false;
       const { service, project } = setup({
         duration: 6,
@@ -895,6 +898,12 @@ run("cancellation", () => {
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      // The killed exe's image lock releases asynchronously; best effort.
+      try {
+        rmSync(exeDir, { recursive: true, force: true });
+      } catch {
+        // Temp dir reclaimed by the OS; never fail the test on cleanup.
+      }
     }
   }, 30_000);
 });

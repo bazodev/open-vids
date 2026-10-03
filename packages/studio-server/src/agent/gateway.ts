@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import {
   AGENT_HEADERS,
@@ -199,6 +199,20 @@ export function createAgentGateway(options: AgentGatewayOptions): AgentGateway {
   const signalChild = (instance: RuntimeInstance, signal: NodeJS.Signals): void => {
     const pid = instance.child.pid;
     if (pid === undefined) return;
+    // A signal only reaches the direct child on Windows, so escalate to
+    // `taskkill /T` and reap the runtime's descendants too.
+    if (process.platform === "win32") {
+      try {
+        const result = spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+          timeout: 10_000,
+        });
+        if (result.status === 0) return;
+      } catch {
+        // Fall through to the direct kill below.
+      }
+    }
     try {
       if (process.platform !== "win32") {
         process.kill(-pid, signal);
@@ -298,6 +312,9 @@ export function createAgentGateway(options: AgentGatewayOptions): AgentGateway {
         },
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
+        // A GUI-launched server has no console; without this the runtime
+        // child flashes one on Windows. No-op on POSIX.
+        windowsHide: true,
       });
     } catch (error) {
       recordFailure();

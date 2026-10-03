@@ -114,7 +114,10 @@ for (const caller of ["helper", "route"]) {
       expect(await response.json()).toEqual({ peaks: readPeaks() });
     }
 
-    it.each([true, false])(
+    // File symlinks need SeCreateSymbolicLinkPrivilege on Windows — and the
+    // symlinked-cache-file attack cannot be staged there — so this runs on
+    // POSIX only (the cache-dir junction cases below cover Windows).
+    it.skipIf(process.platform === "win32").each([true, false])(
       "does not write through a swapped cache symlink (target exists: %s)",
       async (exists) => {
         const target = join(projectDir, "outside.json");

@@ -127,6 +127,7 @@ describe("gif encode args", () => {
   };
 
   it("builds the palettegen pass with diff statistics", () => {
+    // join() yields OS-native separators, so build the expectation the same way.
     expect(buildGifPalettegenArgs(input)).toEqual([
       "-y",
       "-framerate",
@@ -134,7 +135,7 @@ describe("gif encode args", () => {
       "-reinit_filter",
       "0",
       "-i",
-      "/tmp/hf/captured-frames/frame_%06d.jpg",
+      join("/tmp/hf/captured-frames", "frame_%06d.jpg"),
       "-vf",
       "fps=15,palettegen=stats_mode=diff",
       "/tmp/hf/gif-palette.png",
@@ -149,7 +150,7 @@ describe("gif encode args", () => {
       "-reinit_filter",
       "0",
       "-i",
-      "/tmp/hf/captured-frames/frame_%06d.jpg",
+      join("/tmp/hf/captured-frames", "frame_%06d.jpg"),
       "-i",
       "/tmp/hf/gif-palette.png",
       "-lavfi",

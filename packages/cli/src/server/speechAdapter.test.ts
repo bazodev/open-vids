@@ -32,7 +32,12 @@ function fakeSpawn(script: Script) {
       pid: PID,
       stdout: new PassThrough(),
       stderr: new PassThrough(),
-      kill: vi.fn(),
+      // cliChild kills via child.kill() on Windows; mirror runCli's contract so
+      // abort closes the fake child on every platform, not only via process.kill.
+      kill: vi.fn(() => {
+        setImmediate(() => child.emit("close", null));
+        return true;
+      }),
     });
     children.push(child);
     setImmediate(() => {

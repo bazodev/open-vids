@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 /**
  * Every ffprobe/ffmpeg invocation must terminate its options with `--`
@@ -150,23 +150,25 @@ function isSourceFile(entry: string): boolean {
   // caller, and `dither.test.mjs` was one of the 17 broken sites.
   return true;
 }
-
 function discoverCallers(): { found: string[]; unclassified: string[]; shell: string[] } {
   const found: string[] = [];
   const unclassified: string[] = [];
   const shell: string[] = [];
+  // relative() yields OS-native separators ("\\" on Windows); the manifest is
+  // written with POSIX "/" so tests compare equal on every platform.
+  const repoRel = (abs: string): string => relative(REPO_ROOT, abs).split(sep).join("/");
   const classify = (abs: string): void => {
     const src = readFileSync(abs, "utf8");
     if (SHELL_EXT.test(abs) && /(?:^|[^\w-])ffprobe\s+-/m.test(src)) {
-      shell.push(relative(REPO_ROOT, abs));
+      shell.push(repoRel(abs));
     }
     // Discovery is ARGV-shaped, not call-shaped. Matching on spawn/execFile
     // misses a dependency-injected runner — `runner("ffprobe", [...])` in
     // studio-server's mediaValidation.ts is exactly that, and a call-shaped
     // predicate skipped it silently. Anything that BUILDS a probe argv is a
     // caller, however it is invoked.
-    if (argvTails(src).length > 0) found.push(relative(REPO_ROOT, abs));
-    else if (mentionsProbe(src)) unclassified.push(relative(REPO_ROOT, abs));
+    if (argvTails(src).length > 0) found.push(repoRel(abs));
+    else if (mentionsProbe(src)) unclassified.push(repoRel(abs));
   };
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir)) {

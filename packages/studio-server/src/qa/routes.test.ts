@@ -1,13 +1,5 @@
 // @vitest-environment node
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -22,7 +14,7 @@ import {
 } from "@hyperframes/agent-protocol";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { registerQaRoutes } from "../routes/qa.js";
-import type { QaAnalysis } from "./service.js";
+import { writeHangExe } from "../helpers/fakeFfmpeg.js";
 import {
   RENDERS,
   composition,
@@ -426,13 +418,16 @@ run("QA frames and check requests", () => {
     });
 
     const dir = mkdtempSync(join(tmpdir(), "openvids-qa-hang-"));
+    const exeDir = mkdtempSync(join(tmpdir(), "openvids-qa-fake-"));
     try {
       const pidFile = join(dir, "pid");
-      const hang = join(dir, "ffmpeg");
-      writeFileSync(hang, `#!/bin/sh\necho $$ >> "${pidFile}"\nexec sleep 60\n`);
-      chmodSync(hang, 0o755);
-      const { send, project } = setup({ ffmpegPath: hang });
-      RENDERS.clean(project.path("renders/out.mp4"));
+      // A `.sh` stand-in cannot exec on Windows (`spawn EFTYPE`): compiled
+      // exe there (see helpers/fakeFfmpeg.ts), kept outside `dir` since
+      // Windows locks a running exe's image file against cleanup.
+      const { send, project: hangProject } = setup({
+        ffmpegPath: await writeHangExe(exeDir, pidFile),
+      });
+      RENDERS.clean(hangProject.path("renders/out.mp4"));
       // Generous: the suite runs next to other ffmpeg-heavy suites.
       const WAIT = { timeout: 10_000, interval: 25 };
       const client = new AbortController();
@@ -454,6 +449,12 @@ run("QA frames and check requests", () => {
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      // The killed exe's image lock releases asynchronously; best effort.
+      try {
+        rmSync(exeDir, { recursive: true, force: true });
+      } catch {
+        // Temp dir reclaimed by the OS; never fail the test on cleanup.
+      }
     }
   }, 30_000);
 });

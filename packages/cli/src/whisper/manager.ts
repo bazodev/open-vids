@@ -46,6 +46,9 @@ function whichBinary(name: string): string | undefined {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5000,
+      // A GUI-launched lookup has no console; without this it flashes one on
+      // Windows. No-op on POSIX.
+      windowsHide: true,
     });
     const first = output
       .split(/\r?\n/)
@@ -110,6 +113,9 @@ function buildFromSource(onProgress?: (msg: string) => void): WhisperResult {
       stdio: "ignore",
       timeout: 60_000,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      // A GUI-launched build has no console; without this it flashes one on
+      // Windows. No-op on POSIX.
+      windowsHide: true,
     });
   }
 
@@ -119,11 +125,13 @@ function buildFromSource(onProgress?: (msg: string) => void): WhisperResult {
       cwd: BUILD_DIR,
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 120_000,
+      windowsHide: true,
     });
     execFileSync("cmake", ["--build", "build", "--config", "Release", "-j"], {
       cwd: BUILD_DIR,
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 300_000,
+      windowsHide: true,
     });
   } catch (err: unknown) {
     // Build failed — capture diagnostics, then clean up so next attempt starts fresh
@@ -188,6 +196,7 @@ export async function ensureWhisper(options?: {
       execFileSync("brew", ["install", "whisper-cpp"], {
         stdio: "ignore",
         timeout: 300_000,
+        windowsHide: true,
       });
       const installed = findFromSystem();
       if (installed) return { ...installed, source: "brew" };

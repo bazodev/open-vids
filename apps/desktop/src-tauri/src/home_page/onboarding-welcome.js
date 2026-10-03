@@ -4,9 +4,9 @@
   const { ic, esc, tr } = OVS;
   const { OB, title, mark } = OVOB;
 
-  /* name and text are catalog keys. */
+  /* name and text are catalog keys; the folder fact takes its platform wording on Windows. */
   const fact = (icon, name, text) =>
-    `<div class="st-row">${ic(icon)}<div class="st-label"><b>${esc(tr(name))}</b><span>${esc(tr(text))}</span></div></div>`;
+    `<div class="st-row">${ic(icon)}<div class="st-label"><b>${esc(OV.pt(name))}</b><span>${esc(OV.pt(text))}</span></div></div>`;
 
   OVOB.steps.welcome = {
     label: "onboarding.step.welcome",

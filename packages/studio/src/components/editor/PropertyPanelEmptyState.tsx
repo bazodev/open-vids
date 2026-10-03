@@ -4,6 +4,7 @@ import type { DomEditSelection } from "./domEditingTypes";
 import { canHideSelections, isAudioDomElement } from "../../utils/timelineInspector";
 import { Button, IconButton } from "../ui";
 import { Trans, useTranslation } from "../../i18n";
+import { shiftKeyLabel } from "../../utils/platform";
 import { InspectorCompositionFacts } from "./PropertyPanelCompositionFacts";
 import type { InspectorElementKind } from "./PropertyPanelFlatHeader";
 
@@ -66,7 +67,7 @@ function FlatMultiSelectState({
             {t("inspector.empty.multi.title", { count: multiSelectCount })}
           </div>
           <div className="mt-px truncate text-xs text-fg-3">
-            {t("inspector.empty.multi.hint", { key: "⇧" })}
+            {t("inspector.empty.multi.hint", { key: shiftKeyLabel() })}
           </div>
         </div>
         <IconButton

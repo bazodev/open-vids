@@ -271,8 +271,8 @@
     const port = flows.find((f) => f.fixedPort && f.callbackPort);
     const foot =
       port && flows.length > 1
-        ? tr("settings.signin.footPort", { provider: p.name, port: String(port.callbackPort) })
-        : tr("settings.signin.foot", { provider: p.name });
+        ? OV.pt("settings.signin.footPort", { provider: p.name, port: String(port.callbackPort) })
+        : OV.pt("settings.signin.foot", { provider: p.name });
     return (
       `<div class="st-inline">${choice}<button type="button" class="btn" data-act="signin-start" data-v="${id}" data-fk="signin-go:${id}">${esc(
         tr(L[p.id] ? "common.tryAgain" : "settings.signin.start"),

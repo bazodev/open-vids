@@ -5,6 +5,7 @@ import {
   remapBeatAnalysisToComposition,
 } from "../../utils/beatEditActions";
 import { useTranslation } from "../../i18n";
+import { altKeyLabel } from "../../utils/platform";
 import { usePlayerStore } from "../store/playerStore";
 import { CLIP_Y, getTimelineBeatEntries } from "./timelineLayout";
 import type { TimelineTimeRange } from "../lib/timelineClipIndex";
@@ -398,7 +399,7 @@ export const BeatStrip = memo(function BeatStrip({
     renderTimeRange,
     drag ? new Set([activeBeatIndex]) : undefined,
   );
-  const dragHint = t("player.beats.dragHint", { key: "⌥" });
+  const dragHint = t("player.beats.dragHint", { key: altKeyLabel() });
 
   return (
     <div

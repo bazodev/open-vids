@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../i18n";
 import { adjustNumericToken, parseNumericToken } from "./propertyPanelHelpers";
 import { useInspectorGestureTransaction } from "./useInspectorGestureTransaction";
+import { resolveModifierKey } from "../../utils/keyMatch";
 
 function arrowDirection(key: string): 1 | -1 | null {
   if (key === "ArrowUp") return 1;
@@ -131,7 +132,7 @@ export function CommitField({
     scheduleGestureSettle();
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+    if ((event.metaKey || event.ctrlKey) && resolveModifierKey(event.nativeEvent) === "z") {
       cancelGestureFromKeyEvent(event);
       return;
     }

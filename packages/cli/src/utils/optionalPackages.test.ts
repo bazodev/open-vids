@@ -175,54 +175,62 @@ describe("a copy installed beside the CLI", () => {
     }
   });
 
-  it("loads a symlinked copy, as bun and pnpm lay packages out", () => {
-    const pin = OPTIONAL_PACKAGES["onnxruntime-node"];
-    const { root, cliUrl } = layout(pin);
-    const linked = join(root, "node_modules", "onnxruntime-node");
-    const store = join(root, "store", "onnxruntime-node");
-    mkdirSync(join(root, "store"), { recursive: true });
-    renameSync(linked, store);
-    symlinkSync(store, linked, "dir");
-    try {
-      expect(loadBesideCli("onnxruntime-node", cliUrl)).toEqual({ copy: `beside ${pin}` });
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+  // bun/pnpm lay packages out as symlinks; creating that fixture needs
+  // elevation / Developer Mode on Windows (EPERM without it) — skip there.
+  it.skipIf(process.platform === "win32")(
+    "loads a symlinked copy, as bun and pnpm lay packages out",
+    () => {
+      const pin = OPTIONAL_PACKAGES["onnxruntime-node"];
+      const { root, cliUrl } = layout(pin);
+      const linked = join(root, "node_modules", "onnxruntime-node");
+      const store = join(root, "store", "onnxruntime-node");
+      mkdirSync(join(root, "store"), { recursive: true });
+      renameSync(linked, store);
+      symlinkSync(store, linked, "dir");
+      try {
+        expect(loadBesideCli("onnxruntime-node", cliUrl)).toEqual({ copy: `beside ${pin}` });
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("loads a symlinked copy when Node preserves symlinks", () => {
-    const pin = OPTIONAL_PACKAGES["onnxruntime-node"];
-    const { root, cliUrl } = layout(pin);
-    const linked = join(root, "node_modules", "onnxruntime-node");
-    const store = join(root, "store", "onnxruntime-node");
-    mkdirSync(join(root, "store"), { recursive: true });
-    renameSync(linked, store);
-    symlinkSync(store, linked, "dir");
-    // Bundled first: a TS loader cannot itself load under --preserve-symlinks in a bun store.
-    const bundle = join(root, "optionalPackages.mjs");
-    buildSync({
-      entryPoints: [fileURLToPath(new URL("./optionalPackages.ts", import.meta.url))],
-      bundle: true,
-      platform: "node",
-      format: "esm",
-      outfile: bundle,
-    });
-    const script = `const m = await import(${JSON.stringify(pathToFileURL(bundle).href)});
+  // Same fixture as above, run under --preserve-symlinks — skip on Windows too.
+  it.skipIf(process.platform === "win32")(
+    "loads a symlinked copy when Node preserves symlinks",
+    () => {
+      const pin = OPTIONAL_PACKAGES["onnxruntime-node"];
+      const { root, cliUrl } = layout(pin);
+      const linked = join(root, "node_modules", "onnxruntime-node");
+      const store = join(root, "store", "onnxruntime-node");
+      mkdirSync(join(root, "store"), { recursive: true });
+      renameSync(linked, store);
+      // Bundled first: a TS loader cannot itself load under --preserve-symlinks in a bun store.
+      const bundle = join(root, "optionalPackages.mjs");
+      buildSync({
+        entryPoints: [fileURLToPath(new URL("./optionalPackages.ts", import.meta.url))],
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        outfile: bundle,
+      });
+      const script = `const m = await import(${JSON.stringify(pathToFileURL(bundle).href)});
 const url = ${JSON.stringify(cliUrl)};
 console.log(JSON.stringify([m.loadBesideCli("onnxruntime-node", url),
   m.installedOptionalPackageVersion("onnxruntime-node", "/no-cache", url)]));`;
-    try {
-      const child = spawnSync(
-        process.execPath,
-        ["--preserve-symlinks", "--input-type=module", "-e", script],
-        { encoding: "utf-8" },
-      );
-      expect(child.stderr).toBe("");
-      expect(JSON.parse(child.stdout)).toEqual([{ copy: `beside ${pin}` }, pin]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+      try {
+        const child = spawnSync(
+          process.execPath,
+          ["--preserve-symlinks", "--input-type=module", "-e", script],
+          { encoding: "utf-8" },
+        );
+        expect(child.stderr).toBe("");
+        expect(JSON.parse(child.stdout)).toEqual([{ copy: `beside ${pin}` }, pin]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("looks past an empty folder that require skips", () => {
     const pin = OPTIONAL_PACKAGES["onnxruntime-node"];

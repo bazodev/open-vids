@@ -7,22 +7,27 @@
 //!
 //! One slot holds the state:
 //! `idle` → `checking` → `upToDate` | `available` | `failed`;
-//! `available` → `downloading` → `ready` (archive downloaded, minisign
+//! `available` → `downloading` → `ready` (update package downloaded, minisign
 //! signature verified with the updater key in `tauri.conf.json`) → install →
 //! restart, or `failed`.
 //!
 //! - `check` starts a check unless one runs or an update is being applied.
 //! - `install` downloads the available update and, once `ready`, stops the
 //!   processes the app owns (Studio sidecar group, agent runtimes, install jobs:
-//!   the same path as quitting), replaces the bundle and restarts. A project
-//!   that is rendering or running an agent turn refuses without `force`, so the
-//!   page or a native dialog can ask first; a download that finishes while the
-//!   project is busy parks in `ready` and asks the same way.
+//!   the same path as quitting) and installs. A project that is rendering or
+//!   running an agent turn refuses without `force`, so the page or a native
+//!   dialog can ask first; a download that finishes while the project is busy
+//!   parks in `ready` and asks the same way.
 //! - The slot's mutex is never held across network, disk or dialog work:
 //!   callers lock, copy or move out, release.
 //!
-//! The full app archive is downloaded and the whole bundle replaced; nothing
-//! here assumes that, so a layered update can later swap what `apply` installs.
+//! Installing is per platform: macOS swaps the `.app` bundle in place and this
+//! process relaunches it; Windows hands the downloaded NSIS installer to the
+//! updater plugin, which runs it (passive, relaunching the app by default) and
+//! exits this process itself. Stopping what the app owns happens before either,
+//! while this process still can: on Windows the installer cannot overwrite the
+//! files a running process holds open. Nothing here assumes a layered update
+//! cannot later swap what `apply` installs.
 
 use std::cmp::Ordering;
 use std::io::{Read, Write};
@@ -100,6 +105,86 @@ impl UpdateState {
 /// ignored). Never a downgrade, never the same version again.
 pub fn is_newer(current: &semver::Version, offered: &semver::Version) -> bool {
     offered.cmp_precedence(current) == Ordering::Greater
+}
+
+/// The manifest key holding this build's update, as the updater plugin
+/// resolves it: `{os}-{arch}` (`windows-x86_64` for the Windows NSIS builds,
+/// `darwin-aarch64` / `darwin-x86_64` for macOS). `None` where the plugin
+/// supports no target.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn update_target() -> Option<String> {
+    tauri_plugin_updater::target()
+}
+
+/// Manifest keys the plugin tries, in order: `{base}-{bundle}` (e.g.
+/// `windows-x86_64-nsis`) then `{base}` (`windows-x86_64`). `bundle` is the
+/// installer kind for the running bundle (`nsis`, `msi`, `app`, …), if known.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn candidate_targets(base: &str, bundle: Option<&str>) -> Vec<String> {
+    bundle
+        .filter(|bundle| !bundle.is_empty())
+        .map(|bundle| vec![format!("{base}-{bundle}"), base.to_string()])
+        .unwrap_or_else(|| vec![base.to_string()])
+}
+
+/// The first of `candidates` present in the static manifest's `platforms`
+/// map: the entry the plugin would download for this build.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn select_platform_key(manifest: &Value, candidates: &[String]) -> Option<String> {
+    let platforms = manifest.get("platforms")?.as_object()?;
+    candidates
+        .iter()
+        .find(|key| platforms.contains_key(key.as_str()))
+        .cloned()
+}
+
+/// One `latest.json` response reduced to what a check needs for one target:
+/// the announced version, notes and date plus that target's download URL and
+/// signature. Accepts the static shape (`platforms` map) and the dynamic one
+/// (a top-level `url`/`signature` for the requesting platform). `None` when
+/// the shape is wrong or the target is missing.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct ManifestRelease {
+    pub version: String,
+    pub notes: Option<String>,
+    pub date: Option<String>,
+    pub url: String,
+    pub signature: String,
+}
+
+/// Read `manifest` for `target`. Mirrors what `find_update` keeps from the
+/// plugin's answer (notes trimmed and cut to `NOTES_LIMIT`). A test-only
+/// mirror of the plugin's own target resolution, so the Windows manifest
+/// shape can be pinned without a live release.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn parse_manifest_release(manifest: &Value, target: &str) -> Option<ManifestRelease> {
+    let version = manifest.get("version")?.as_str()?;
+    let entry = manifest
+        .get("platforms")
+        .and_then(|platforms| platforms.get(target))
+        .or_else(|| {
+            if manifest.get("url").is_some() {
+                Some(manifest)
+            } else {
+                None
+            }
+        })?;
+    Some(ManifestRelease {
+        version: version.to_string(),
+        notes: manifest
+            .get("notes")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|notes| !notes.is_empty())
+            .map(|notes| notes.chars().take(NOTES_LIMIT).collect()),
+        date: manifest
+            .get("pub_date")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        url: entry.get("url")?.as_str()?.to_string(),
+        signature: entry.get("signature")?.as_str()?.to_string(),
+    })
 }
 
 /// What a check found, apart from the plugin's `Update` handle.
@@ -518,9 +603,9 @@ async fn download(app: tauri::AppHandle, generation: u64, update: Update) {
     }
 }
 
-/// Stop what the app owns, replace the bundle, restart. Runs on a plain
-/// thread. `forced`: the user already agreed to restart a busy project, or
-/// the caller just found it idle.
+/// Stop what the app owns, install the verified update, restart. Runs on a
+/// plain thread. `forced`: the user already agreed to restart a busy project,
+/// or the caller just found it idle.
 fn apply(app: &tauri::AppHandle, generation: u64, update: Update, bytes: Vec<u8>, forced: bool) {
     if !forced && project_activity(app).is_some_and(|activity| activity.busy()) {
         slot().park(generation, bytes);
@@ -528,8 +613,20 @@ fn apply(app: &tauri::AppHandle, generation: u64, update: Update, bytes: Vec<u8>
         restart_busy_project_if_confirmed();
         return;
     }
+    // Before the installer runs: on Windows it cannot overwrite the files a
+    // running process holds open, so everything the app owns is already down.
     crate::release_for_update(app);
-    match update.install(&bytes) {
+    #[cfg(unix)]
+    apply_unix(app, generation, &update, &bytes);
+    #[cfg(windows)]
+    apply_windows(generation, &update, &bytes);
+}
+
+/// macOS: swap the `.app` bundle in place, then relaunch it from outside this
+/// process (see `relaunch_after_exit`).
+#[cfg(unix)]
+fn apply_unix(app: &tauri::AppHandle, generation: u64, update: &Update, bytes: &[u8]) {
+    match update.install(bytes) {
         Ok(()) => {
             eprintln!("[openvids] update {} installed, restarting", update.version);
             crate::logfile::shell(&format!("update {} installed, restarting", update.version));
@@ -553,7 +650,23 @@ fn apply(app: &tauri::AppHandle, generation: u64, update: Update, bytes: Vec<u8>
     }
 }
 
+/// Windows: hand the verified package to the updater plugin, which writes the
+/// NSIS installer to a temp file and spawns it in passive mode (`/P /UPDATE`,
+/// relaunching the app itself through `/R`), then exits this process. A
+/// success never returns, so there is nothing left to relaunch here; a
+/// failure returns and lands in `failed` like everywhere else.
+#[cfg(windows)]
+fn apply_windows(generation: u64, update: &Update, bytes: &[u8]) {
+    eprintln!("[openvids] installing update {}", update.version);
+    if let Err(err) = update.install(bytes) {
+        let err = install_error(&err.to_string());
+        eprintln!("[openvids] {err}");
+        slot().install_failed(generation, &err);
+    }
+}
+
 /// How long the relauncher waits for this process to exit before it opens the app anyway.
+#[cfg(unix)]
 const RELAUNCH_WAIT_TENTHS: u32 = 300;
 
 /// Open the new bundle through LaunchServices once this process has exited.
@@ -591,7 +704,7 @@ fn relaunch_after_exit() -> std::io::Result<()> {
         .map(drop)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn relaunch_after_exit() -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
@@ -1074,5 +1187,137 @@ mod tests {
             .unwrap()
             .busy());
         assert_eq!(Activity::parse(&json!({ "error": "not found" })), None);
+    }
+    #[test]
+    fn manifest_targets_pick_the_build_and_its_entry() {
+        // The plugin tries `{base}-{bundle}` before `{base}`; the NSIS build
+        // wins as soon as it is there.
+        assert_eq!(
+            candidate_targets("windows-x86_64", Some("nsis")),
+            vec!["windows-x86_64-nsis", "windows-x86_64"]
+        );
+        assert_eq!(
+            candidate_targets("darwin-aarch64", Some("app")),
+            vec!["darwin-aarch64-app", "darwin-aarch64"]
+        );
+        assert_eq!(
+            candidate_targets("windows-x86_64", None),
+            vec!["windows-x86_64"]
+        );
+        assert_eq!(
+            candidate_targets("windows-x86_64", Some("")),
+            vec!["windows-x86_64"]
+        );
+
+        let manifest = json!({
+            "version": "0.3.0",
+            "notes": "  Fixes  ",
+            "pub_date": "2026-10-02T10:00:00Z",
+            "platforms": {
+                "darwin-aarch64": { "url": "https://example.invalid/mac.tar.gz", "signature": "macsig" },
+                "windows-x86_64": { "url": "https://example.invalid/OpenVids_0.3.0_x64-setup.exe", "signature": "winsig" },
+            }
+        });
+        let candidates = candidate_targets("windows-x86_64", Some("nsis"));
+        assert_eq!(
+            select_platform_key(&manifest, &candidates).as_deref(),
+            Some("windows-x86_64"),
+            "falls back to the base entry when no -nsis one is published"
+        );
+        let manifest = json!({
+            "version": "0.3.0",
+            "platforms": {
+                "windows-x86_64-nsis": { "url": "https://example.invalid/nsis.exe", "signature": "nsissig" },
+                "windows-x86_64": { "url": "https://example.invalid/other.exe", "signature": "othersig" },
+            }
+        });
+        assert_eq!(
+            select_platform_key(&manifest, &candidates).as_deref(),
+            Some("windows-x86_64-nsis"),
+            "prefers the bundle-qualified entry when published"
+        );
+        assert_eq!(
+            select_platform_key(&manifest, &["darwin-aarch64".to_string()]),
+            None,
+            "a windows-only manifest has nothing for the macOS build"
+        );
+    }
+
+    #[test]
+    fn a_static_manifest_with_a_windows_entry_parses_for_that_target() {
+        let manifest = json!({
+            "version": "0.3.0",
+            "notes": "  Fixes and more  ",
+            "pub_date": "2026-10-02T10:00:00Z",
+            "platforms": {
+                "darwin-aarch64": {
+                    "url": "https://example.invalid/OpenVids_0.3.0_aarch64.app.tar.gz",
+                    "signature": "macsig"
+                },
+                "windows-x86_64": {
+                    "url": "https://example.invalid/OpenVids_0.3.0_x64-setup.exe",
+                    "signature": "winsig"
+                },
+            }
+        });
+        let release =
+            parse_manifest_release(&manifest, "windows-x86_64").expect("the windows entry parses");
+        assert_eq!(release.version, "0.3.0");
+        assert_eq!(release.notes.as_deref(), Some("Fixes and more"));
+        assert_eq!(release.date.as_deref(), Some("2026-10-02T10:00:00Z"));
+        assert!(release.url.ends_with("-setup.exe"));
+        assert_eq!(release.signature, "winsig");
+        assert!(
+            is_newer(&v("0.2.0"), &v(&release.version)),
+            "the parsed version compares newer than the last release"
+        );
+        assert_eq!(parse_manifest_release(&manifest, "linux-x86_64"), None);
+        assert_eq!(
+            parse_manifest_release(&json!({ "version": "0.3.0" }), "windows-x86_64"),
+            None,
+            "no platforms and no top-level url: nothing to download"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_manifest_parses_without_a_platforms_map() {
+        let manifest = json!({
+            "version": "0.3.0",
+            "notes": "",
+            "pub_date": "2026-10-02T10:00:00Z",
+            "url": "https://example.invalid/OpenVids_0.3.0_x64-setup.exe",
+            "signature": "winsig"
+        });
+        let release = parse_manifest_release(&manifest, "windows-x86_64")
+            .expect("a server-resolved manifest parses");
+        assert_eq!(
+            release.url,
+            "https://example.invalid/OpenVids_0.3.0_x64-setup.exe"
+        );
+        assert_eq!(release.notes, None, "blank notes stay blank");
+    }
+
+    #[test]
+    fn the_plugin_target_matches_the_release_manifest_key() {
+        let Some(target) = update_target() else {
+            panic!("the updater plugin knows this build's target");
+        };
+        assert!(
+            !target.is_empty() && target.contains('-'),
+            "a `{{os}}-{{arch}}` key, got {target:?}"
+        );
+        if cfg!(windows) {
+            assert_eq!(target, "windows-x86_64");
+            assert_eq!(
+                candidate_targets(&target, Some("nsis"))[1],
+                "windows-x86_64",
+                "the fallback key the release manifest must carry"
+            );
+        } else if cfg!(target_os = "macos") {
+            assert!(
+                target == "darwin-aarch64" || target == "darwin-x86_64",
+                "unexpected macOS target {target:?}"
+            );
+        }
     }
 }

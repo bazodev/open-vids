@@ -6,6 +6,7 @@ import { SegmentedControl } from "../ui/SegmentedControl";
 import { Select, type SelectOption } from "../ui/Select";
 import { Toggle } from "../ui/Toggle";
 import { LANGUAGES, useTranslation, type TranslationKey } from "../../i18n";
+import { platformKey } from "../../utils/platform";
 import {
   APP_LANGUAGES,
   NEW_PROJECT_FPS,
@@ -87,7 +88,13 @@ function LocationField({
           className="w-64 font-mono text-num"
           onCommit={(next) => {
             const path = next.trim();
-            rejected.current = !path.startsWith("/") && !path.startsWith("~");
+            // Mirrors the server's `isLocation` shape check: POSIX absolute
+            // everywhere, drive-letter/UNC additionally on Windows.
+            rejected.current =
+              !path.startsWith("/") &&
+              !path.startsWith("~") &&
+              !/^[A-Za-z]:([\\/]|$)/.test(path) &&
+              !path.startsWith("\\\\");
             setInvalid(rejected.current);
             if (rejected.current) return;
             setEditing(false);
@@ -236,9 +243,9 @@ export function GeneralSection() {
             }}
           />
         </SettingsRow>
-        <SettingsRow label={t("settings.general.confirmTrash")}>
+        <SettingsRow label={t(platformKey("settings.general.confirmTrash"))}>
           <Toggle
-            label={t("settings.general.confirmTrash")}
+            label={t(platformKey("settings.general.confirmTrash"))}
             checked={preferences.confirmTrash}
             onCommit={(confirmTrash) => save({ confirmTrash })}
           />

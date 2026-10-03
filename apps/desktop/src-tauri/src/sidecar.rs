@@ -116,9 +116,13 @@ impl StudioServer {
 /// (where the Projects page lives, for the header's back button),
 /// `openvidsTheme` (the resolved theme for first paint), `openvidsLanguage`
 /// (the raw `language` preference — `system` or a locale code — which Studio
-/// resolves itself) and, when the open asks for one, `openvidsWorkspace`. A
-/// query survives View > Reload (it outlives hash rewrites) and the prod
-/// Hono server ignores it via its SPA fallback.
+/// resolves itself) and, when the open asks for one, `openvidsWorkspace`. On
+/// Windows without the system frame it also carries `openvidsFrame=custom`
+/// (or `=system` under the `OPENVIDS_SYSTEM_FRAME=1` fallback), so the Studio
+/// header knows which titlebar chrome to draw; on macOS the parameter is
+/// absent and the header keeps its traffic-light inset. A query survives View
+/// \> Reload (it outlives hash rewrites) and the prod Hono server ignores it
+/// via its SPA fallback.
 pub fn studio_url(
     studio_origin: &str,
     project_id: &str,
@@ -126,6 +130,7 @@ pub fn studio_url(
     theme: &str,
     language: &str,
     workspace: Option<&str>,
+    frame: &str,
 ) -> String {
     let mut query = format!(
         "openvidsHome={}&openvidsTheme={}&openvidsLanguage={}",
@@ -135,6 +140,11 @@ pub fn studio_url(
     );
     if let Some(workspace) = workspace {
         query.push_str(&format!("&openvidsWorkspace={}", urlencode(workspace)));
+    }
+    // The overlay frame is the default (macOS): no parameter, so existing
+    // links and tests stay byte-identical. Any other frame kind is explicit.
+    if frame != "overlay" {
+        query.push_str(&format!("&openvidsFrame={}", urlencode(frame)));
     }
     format!("{studio_origin}/?{query}#project/{}", urlencode(project_id))
 }
@@ -162,7 +172,7 @@ pub fn urlencode(value: &str) -> String {
     out
 }
 
-/// Reap the sidecar's process group when the app shuts down.
+/// Reap the sidecar's whole tree when the app shuts down.
 ///
 /// This is the normal teardown path, and it works: measured in the ad-hoc-signed
 /// `OpenVids.app`, `libc::killpg(pgid, SIGTERM)` returns 0 and the full
@@ -174,35 +184,10 @@ pub fn urlencode(value: &str) -> String {
 ///
 /// It cannot cover the cases where OpenVids' own code never runs — a
 /// `SIGKILL`, a crash, a logout — because then nothing gets to call this. That
-/// is what `sidecar/serve.mjs` is for; see "Teardown" in the README.
-///
-/// Windows has no process groups, so it uses `Child::kill` instead.
+/// is what `sidecar/serve.mjs` (unix) and the kill-on-close Job Object
+/// (`crate::proc`, Windows) are for; see "Teardown" in the README.
 fn terminate(child: &mut Child) {
-    #[cfg(unix)]
-    {
-        let pid = child.id() as libc::pid_t;
-        if pid > 0 {
-            // SIGTERM first so the CLI runs its own shutdown (it closes Chrome
-            let signalled = unsafe { libc::killpg(pid, libc::SIGTERM) } == 0;
-            if signalled {
-                let deadline = Instant::now() + TERM_GRACE;
-                while Instant::now() < deadline {
-                    if matches!(child.try_wait(), Ok(Some(_))) {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(50));
-                }
-                // Unconditional, and not only when the leader survived: the
-                // group can outlive it, and a lingering Chrome still holds the
-                // port. killpg on a dead group is just ESRCH.
-                unsafe { libc::killpg(pid, libc::SIGKILL) };
-            }
-            let _ = child.wait();
-            return;
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+    crate::proc::terminate(child, TERM_GRACE);
 }
 
 /// Reserve a loopback port from the OS and hand it back.
@@ -284,16 +269,16 @@ pub fn start(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
-    // Own process group, so terminate() can signal the CLI and every browser
-    // it spawned in one shot.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+    for (key, value) in super::ffmpeg_install::managed_env() {
+        command.env(key, value);
     }
 
+    // Own supervision scope, so terminate() stops the CLI and every browser
+    // it spawned in one shot (process group on unix, Job Object on Windows).
+    crate::proc::configure(&mut command);
+
     let mut child = command.spawn().map_err(SidecarError::Spawn)?;
+    crate::proc::track(&child);
 
     if let Some(stderr) = child.stderr.take() {
         // Surface runtime diagnostics in the app's own log instead of dropping

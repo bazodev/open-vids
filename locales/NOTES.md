@@ -18,7 +18,7 @@ could be a noun). Keys are listed by area; a key that is not here reads as it sa
 - `home.time.weekdayAt` — {weekday} is a localized weekday name, {time} a clock time.
 - `home.media.clips` — Clip count of a project.
 - `home.size.bytes` — File size under 1000 bytes.
-- `home.size.kb` — File size unit, 1000-based (as Finder). {value} is already formatted.
+- `home.size.kb` — File size unit, 1000-based (as the file manager). {value} is already formatted.
 - `home.error.requestFailed` — Fallback error text when the local server gives no message; {status} is an HTTP status code.
 - `home.item.notFound` — Status of a project whose folder is gone.
 - `home.item.locate` — Link and menu item: point OpenVids at the project's new folder.
@@ -32,9 +32,10 @@ could be a noun). Keys are listed by area; a key that is not here reads as it sa
 - `home.hint.select` — Status bar hint next to the arrow keys.
 - `home.hint.open` — Status bar hint next to the Return key.
 - `home.hint.rename` — Status bar hint next to F2.
-- `home.hint.search` — Status bar hint next to the Command-F shortcut.
+- `home.hint.search` — Status bar hint next to the search keycap (⌘F on macOS, Ctrl+F on Windows).
 - `home.item.removeFromRecent` — Removes the entry from the list only; files stay on disk.
 - `home.item.trashConfirm` — Same action as "Move to Trash"; the ellipsis means a confirmation follows.
+- `*.win` — Windows variant of a Mac-worded key, shown when the platform is not macOS (File Explorer for Finder, Recycle Bin for Trash, “this computer” for “this Mac”, Ctrl/Shift/Alt spellings for ⌘/⇧/⌥ glyphs). The base key is the macOS wording and stays byte-identical.
 - `home.error.load` — {message} is the error text from the app's local server.
 - `home.error.reveal` — {message} is the error text from the app's local server.
 - `home.error.duplicate` — {message} is the error text from the app's local server.
@@ -161,7 +162,7 @@ could be a noun). Keys are listed by area; a key that is not here reads as it sa
 - `settings.agents.col.model` — Table column heading.
 - `settings.agents.col.effort` — Table column heading: how long the model reasons before answering.
 - `settings.agents.col.on` — Table column heading: whether the agent is on by default (switch).
-- `settings.key.foot` — OMP is the agent toolkit OpenVids can reuse logins from; it is a name, not translated.
+- `settings.key.foot` — OMP is the agent toolkit OpenVids can reuse logins from; it is a name, not translated. “System keychain or credential store” covers the macOS Keychain on Mac and Windows Credential Manager on Windows; keys are never stored in either (they live in OpenVids’ own files).
 - `settings.providers.synced.date` — {date} is a short date such as “Oct 1”.
 - `settings.providers.key.replace` — Placeholder of the key field when a key is already stored.
 - `settings.providers.connect` — Button next to the API key field.

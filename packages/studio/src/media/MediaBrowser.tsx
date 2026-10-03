@@ -8,6 +8,8 @@ import { usePlayerStore } from "../player/store/playerStore";
 import { studioStoryStore } from "../story/storyContext";
 import { TIMELINE_ASSET_MIME } from "../utils/timelineAssetDrop";
 import { copyTextToClipboard } from "../utils/clipboard";
+import { resolveShortcutKey } from "../utils/platform";
+import { resolveModifierKey } from "../utils/keyMatch";
 import { MediaDropTray, type DropTarget } from "./MediaDropTray";
 import { LIST_COLUMNS, MediaCard, MediaRow, type TileHandlers } from "./MediaTiles";
 import { MediaToolbar, TILE_SIZE_CLASSES, type MediaViewState } from "./MediaToolbar";
@@ -100,7 +102,7 @@ export function MediaBrowser(props: MediaBrowserProps) {
   // ⌘F searches the library while the Media workspace shows.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
+      if (!(event.metaKey || event.ctrlKey) || resolveModifierKey(event) !== "f") return;
       const input = searchRef.current?.querySelector("input");
       if (!input) return;
       event.preventDefault();
@@ -302,7 +304,7 @@ export function MediaBrowser(props: MediaBrowserProps) {
       )}
       {osDrop && (
         <div className="pointer-events-none absolute inset-1 z-40 flex items-center justify-center rounded-lg border-[1.5px] border-dashed border-accent bg-accent-soft text-sm font-medium text-fg">
-          {t("media.drop.importOverlay")} <Kbd className="ml-2">⌘I</Kbd>
+          {t("media.drop.importOverlay")} <Kbd className="ml-2">{resolveShortcutKey("⌘I")}</Kbd>
         </div>
       )}
       {menu && (

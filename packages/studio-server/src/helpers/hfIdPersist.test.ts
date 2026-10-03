@@ -54,18 +54,25 @@ describe("stampFileHfIds", () => {
     const returned = stampFileHfIds(file);
 
     expect(readFileSync(file, "utf-8")).toBe(returned);
-    expect(readdirSync(file.replace(/\/[^/]+$/, ""))).toEqual(["scene.html"]);
+    expect(readdirSync(join(file, ".."))).toEqual(["scene.html"]);
   });
 
   it.each([
     ["in place", (file: string, html: string) => writeFileSync(file, html)],
-    [
-      "by rename",
-      (file: string, html: string) => {
-        writeFileSync(`${file}.tmp`, html);
-        renameSync(`${file}.tmp`, file);
-      },
-    ],
+    // Windows locks an open file against rename/unlink, so the agent's
+    // rename-while-stamping cannot happen there — and the stamp now closes
+    // its handle before replacing, so in-place is the meaningful case.
+    ...(process.platform === "win32"
+      ? []
+      : ([
+          [
+            "by rename",
+            (file: string, html: string) => {
+              writeFileSync(`${file}.tmp`, html);
+              renameSync(`${file}.tmp`, file);
+            },
+          ] as const,
+        ] as const)),
   ])("keeps a write that lands %s while ids are minted", (_, write) => {
     const file = tmpFile(`<div class="clip" data-start="0" data-end="3">Hi</div>`);
     const agentWrite = `<div class="clip" data-start="0" data-end="5">Agent</div>`;
@@ -75,7 +82,6 @@ describe("stampFileHfIds", () => {
 
     expect(readFileSync(file, "utf-8")).toBe(agentWrite);
   });
-
   it("leaves a file deleted while ids are minted deleted", () => {
     const file = tmpFile(`<div class="clip" data-start="0" data-end="3">Hi</div>`);
     hooks.minting = () => rmSync(file);

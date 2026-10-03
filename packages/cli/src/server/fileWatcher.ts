@@ -158,12 +158,17 @@ export function createProjectWatcher(projectDir: string): ProjectWatcher {
       // runtime — dropping those at ingest left the CLI server's ETag stale
       // until restart — and the Story Graph is tracked by project history.
       // Admit them here and let the reload listener re-apply its own filter,
-      // so what triggers a browser reload is unchanged.
-      if (
-        !shouldWatchProjectFile(relativePath) &&
-        !affectsProjectHistory(projectDir, join(projectDir, relativePath))
-      ) {
-        return;
+      // so what triggers a browser reload is unchanged. The story/graph
+      // directory events themselves carry no file identity, but the watcher
+      // must arm on them: the recursive watch reports the new dir before any
+      // tracked file inside exists, and dropping it leaves later story files
+      // unreported. Only the history-tracked family passes, not the subtree.
+      const historyDirEvent =
+        relativePath === ".hyperframes" ||
+        relativePath === join(".hyperframes", "story") ||
+        relativePath === join(".hyperframes", "research");
+      if (!shouldWatchProjectFile(relativePath) && !historyDirEvent) {
+        if (!affectsProjectHistory(projectDir, join(projectDir, relativePath))) return;
       }
 
       pendingPaths.add(relativePath);

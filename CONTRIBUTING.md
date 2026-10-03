@@ -7,9 +7,18 @@ Everyone taking part in the project follows the [Code of Conduct](CODE_OF_CONDUC
 
 ## Setup
 
-You need macOS, [Bun](https://bun.sh), a Rust stable toolchain, Node.js 22+, FFmpeg with ffprobe on
-`PATH`, a Chrome the CLI can drive, and [Git LFS](https://git-lfs.com) (render test fixtures are
+You need [Bun](https://bun.sh), a Rust stable toolchain, Node.js 22+, FFmpeg with ffprobe on
+`PATH` (on Windows an FFmpeg from the app's download button also works for running the app),
+a Chrome the CLI can drive, and [Git LFS](https://git-lfs.com) (render test fixtures are
 stored in LFS).
+
+macOS: Xcode Command Line Tools (or Xcode). Windows: the MSVC Build Tools (C++ workload,
+for the Rust/MSVC linker), Rust with the MSVC target, and a WebView2 runtime (the installer
+bootstraps it; for `desktop:dev` use an evergreen WebView2 from Windows Update or the Edge installer).
+CI runs on both macOS and Windows.
+
+Symlink-based tests need symlink privilege (Developer Mode or elevation) on Windows; without it
+they skip. The desktop duplicate/copy paths have their own privilege-free unit tests.
 
 ```bash
 git lfs install
@@ -19,7 +28,8 @@ bun install
 bun run desktop:dev
 ```
 
-OpenVids uses Bun. Do not use npm or pnpm, and do not commit their lockfiles.
+OpenVids uses Bun. Do not use npm or pnpm, and do not commit their lockfiles. See
+`apps/desktop/README.md` (Prerequisites, Teardown, Rendering/FFmpeg) for the desktop details.
 
 ## Before you open a pull request
 

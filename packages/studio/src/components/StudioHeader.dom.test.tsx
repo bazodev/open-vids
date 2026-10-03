@@ -229,3 +229,64 @@ it("offers Report a problem only inside the desktop shell, and asks the home ser
     vi.unstubAllGlobals();
   }
 });
+
+it("keeps the traffic-light inset on the macOS overlay frame", () => {
+  const host = mount("?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035");
+  expect(host.querySelector('[data-testid="window-controls"]')).toBeNull();
+  expect(host.querySelector(".w-\\[52px\\]")).not.toBeNull();
+});
+
+it("draws caption buttons with no traffic-light inset on the Windows custom frame", () => {
+  const host = mount("?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsFrame=custom");
+  expect(host.querySelector(".w-\\[52px\\]")).toBeNull();
+  const controls = query(host, '[data-testid="window-controls"]');
+  const min = query(host, '[data-testid="window-minimize"]');
+  const max = query(host, '[data-testid="window-maximize"]');
+  const close = query(host, '[data-testid="window-close"]');
+  expect(controls.contains(min)).toBe(true);
+  expect(controls.contains(max)).toBe(true);
+  expect(controls.contains(close)).toBe(true);
+  expect(max.getAttribute("aria-label")).toBe("Maximize");
+  for (const el of [min, max, close]) {
+    expect(el.getAttribute("tabindex")).toBe("-1");
+    expect(isTypingTarget(el)).toBe(false);
+    expect(shouldIgnorePlaybackShortcutTarget(el)).toBe(true);
+  }
+  // The Projects page's own shapes, not the Phosphor set: minimize is one
+  // horizontal stroke, maximize a single outlined square.
+  expect(min.querySelector("svg")).not.toBeNull();
+  expect(min.textContent).toBe("");
+  expect(max.querySelectorAll("svg rect").length).toBe(1);
+});
+
+it("draws neither inset nor caption buttons on the Windows system-frame fallback", () => {
+  const host = mount("?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsFrame=system");
+  expect(host.querySelector(".w-\\[52px\\]")).toBeNull();
+  expect(host.querySelector('[data-testid="window-controls"]')).toBeNull();
+});
+
+it("shows the app menu button only on the Windows custom frame", () => {
+  // macOS overlay: the real menu bar owns these actions.
+  expect(
+    mount("?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035").querySelector(
+      '[data-testid="openvids-app-menu"]',
+    ),
+  ).toBeNull();
+  // Windows system-frame fallback: the native bar is visible again.
+  expect(
+    mount("?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsFrame=system").querySelector(
+      '[data-testid="openvids-app-menu"]',
+    ),
+  ).toBeNull();
+  // Windows custom frame: the button sits in the traffic-light inset's slot
+  // and stays tabbable (a real control, unlike the caption buttons).
+  const custom = mount("?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsFrame=custom");
+  const menu = query(custom, '[data-testid="openvids-app-menu"]');
+  expect(menu.tagName).toBe("BUTTON");
+  // A real control, unlike the caption buttons (tabindex -1): Base UI's menu
+  // trigger stays in Tab order (tabindex 0), keyboard-operable like the menu.
+  expect(menu.getAttribute("tabindex")).toBe("0");
+  expect(menu.getAttribute("aria-label")).toBe("Application menu");
+  expect(isTypingTarget(menu)).toBe(false);
+  expect(shouldIgnorePlaybackShortcutTarget(menu)).toBe(true);
+});

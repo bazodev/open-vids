@@ -4,6 +4,7 @@ import { useLivePreviewIframe } from "../../player/store/previewIframeStore";
 import { useCaptionStore } from "../store";
 import { usePlayerStore } from "../../player";
 import { shouldHandleCaptionNudgeKey, isEditableEventTarget } from "../keyboard";
+import { resolveModifierKey } from "../../utils/keyMatch";
 import {
   readWordBoxes,
   getWordEl,
@@ -189,7 +190,7 @@ export const CaptionOverlay = memo(function CaptionOverlay({ iframeRef }: Captio
       // ⌘A / Ctrl+A selects every caption word (unless typing in a field).
       if (
         (e.metaKey || e.ctrlKey) &&
-        e.key.toLowerCase() === "a" &&
+        resolveModifierKey(e) === "a" &&
         !e.shiftKey &&
         !e.altKey &&
         !isEditableEventTarget(e.target)

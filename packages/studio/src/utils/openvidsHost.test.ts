@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   OPENVIDS_HOME_PARAM,
   isValidOpenvidsHomeOrigin,
+  readOpenvidsFrame,
   readOpenvidsHomeOrigin,
 } from "./openvidsHost";
 
@@ -70,5 +71,23 @@ describe("readOpenvidsHomeOrigin", () => {
         `?${OPENVIDS_HOME_PARAM}=${encodeURIComponent("javascript:alert(1)")}`,
       ),
     ).toBeNull();
+  });
+});
+
+describe("readOpenvidsFrame", () => {
+  it("defaults to overlay without the param", () => {
+    expect(readOpenvidsFrame("")).toBe("overlay");
+    expect(readOpenvidsFrame("?tab=design")).toBe("overlay");
+  });
+
+  it("reads the Windows frames", () => {
+    expect(readOpenvidsFrame("?openvidsFrame=custom")).toBe("custom");
+    expect(readOpenvidsFrame("?openvidsFrame=system")).toBe("system");
+  });
+
+  it("falls back to overlay for unknown values, never to buttons", () => {
+    expect(readOpenvidsFrame("?openvidsFrame=overlay")).toBe("overlay");
+    expect(readOpenvidsFrame("?openvidsFrame=frameless")).toBe("overlay");
+    expect(readOpenvidsFrame("?openvidsFrame=")).toBe("overlay");
   });
 });

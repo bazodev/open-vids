@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import {
   descriptorFromManifest,
@@ -78,9 +79,10 @@ describe("package subpath contracts", () => {
   });
 
   it("derives exact build aliases from selected public subpaths", () => {
-    assert.deepEqual(sourceAliasEntries(descriptor, "/repo/packages/example", ["./browser"]), [
-      ["@hyperframes/example/browser", "/repo/packages/example/src/browser.ts"],
-    ]);
+    assert.deepEqual(
+      sourceAliasEntries(descriptor, resolve("/repo/packages/example"), ["./browser"]),
+      [["@hyperframes/example/browser", resolve("/repo/packages/example", "src/browser.ts")]],
+    );
   });
 
   it("preserves packages that intentionally resolve local Node imports from dist", () => {

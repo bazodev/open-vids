@@ -154,9 +154,10 @@ describe("resolveProxy", () => {
 
     expect(result).toBe(expectedCachePath);
     expect(existsSync(expectedCachePath)).toBe(true);
-    // No leftover temp file next to the final cache entry.
+    // No leftover temp file next to the final cache entry (the cache path is
+    // backslash-joined on Windows, so split on both separators).
     const cacheDirEntries = readdirSync(join(projectDir, ".transcode-cache"));
-    expect(cacheDirEntries).toEqual([expectedCachePath.split("/").at(-1)]);
+    expect(cacheDirEntries).toEqual([expectedCachePath.split(/[\\/]/).at(-1)]);
   });
 
   it("uses Chromium-compatible VP8 alpha args and a distinct WebM cache path", async () => {
@@ -501,26 +502,31 @@ describe("resolveProxy", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("proxies an external target reached through an in-project symlink", async () => {
-    const { spawn, calls } = createSpawnSpy();
-    const { resolveProxy, getProxyCachePath } = await loadModule(spawn, FFMPEG_PATH);
-    const projectDir = tmpProject();
-    const outsideDir = tmpProject();
-    const outsidePath = join(outsideDir, "outside.mov");
-    const sourcePath = join(projectDir, "linked.mov");
-    writeFileSync(outsidePath, "source-bytes");
-    symlinkSync(outsidePath, sourcePath);
+  // File symlinks need SeCreateSymbolicLinkPrivilege on Windows: skip the
+  // link setup there (the outside-project rejection above covers the guard).
+  it.skipIf(process.platform === "win32")(
+    "proxies an external target reached through an in-project symlink",
+    async () => {
+      const { spawn, calls } = createSpawnSpy();
+      const { resolveProxy, getProxyCachePath } = await loadModule(spawn, FFMPEG_PATH);
+      const projectDir = tmpProject();
+      const outsideDir = tmpProject();
+      const outsidePath = join(outsideDir, "outside.mov");
+      const sourcePath = join(projectDir, "linked.mov");
+      writeFileSync(outsidePath, "source-bytes");
+      symlinkSync(outsidePath, sourcePath);
 
-    const cachePath = getProxyCachePath(projectDir, sourcePath);
-    const result = resolveProxy(projectDir, sourcePath);
-    await flush();
+      const cachePath = getProxyCachePath(projectDir, sourcePath);
+      const result = resolveProxy(projectDir, sourcePath);
+      await flush();
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.args).toContain(realpathSync(outsidePath));
-    succeed(calls[0]!);
-    await expect(result).resolves.toBe(cachePath);
-    expect(cachePath.startsWith(join(realpathSync(projectDir), ".transcode-cache"))).toBe(true);
-  });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.args).toContain(realpathSync(outsidePath));
+      succeed(calls[0]!);
+      await expect(result).resolves.toBe(cachePath);
+      expect(cachePath.startsWith(join(realpathSync(projectDir), ".transcode-cache"))).toBe(true);
+    },
+  );
 
   it("retries after the source file changes (mtime in the cache key invalidates the remembered failure)", async () => {
     const { spawn, calls } = createSpawnSpy();

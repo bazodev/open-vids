@@ -1446,6 +1446,9 @@ async function runDevMode(dir: string, options?: StudioLaunchOptions): Promise<v
       projectName: pName,
       browserGpuMode: options?.browserGpuMode,
     }),
+    // A GUI-launched preview has no console; without this Vite flashes one
+    // on Windows. No-op on POSIX.
+    windowsHide: true,
   });
 
   attachStudioReadyHandler(child, s, pName, dir, options);
@@ -1508,6 +1511,7 @@ async function runLocalStudioMode(dir: string, options?: StudioLaunchOptions): P
       projectName: pName,
       browserGpuMode: options?.browserGpuMode,
     }),
+    windowsHide: true,
   });
 
   attachStudioReadyHandler(child, s, pName, dir, options);

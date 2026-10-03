@@ -1,9 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectToolStatus, ffVersionNumber } from "./preflight.js";
 import * as manager from "./manager.js";
+
+const runProcess = vi.hoisted(() => vi.fn());
+
+// Run no real binary: CreateProcess cannot exec the POSIX shell stubs this
+// test used before, chmod +x is a no-op here, and .cmd shims need shell:true
+// which the runner never passes. Version parsing is covered through the
+// stubbed banner; real spawning is covered by preflight.test.ts.
+vi.mock("../utils/cancellableProcess.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/cancellableProcess.js")>();
+  return {
+    ...actual,
+    runCancellableProcess: (
+      command: string,
+      args: readonly string[],
+      options: { signal?: AbortSignal },
+    ) => runProcess(command, args, options),
+  };
+});
 
 describe("ffVersionNumber", () => {
   it("reads the number out of a version banner", () => {
@@ -26,6 +44,8 @@ describe("collectToolStatus", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "openvids-toolstatus-"));
+    runProcess.mockReset();
+    runProcess.mockResolvedValue({ stdout: "ffmpeg version 9.0.2 Copyright", stderr: "" });
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -39,17 +59,18 @@ describe("collectToolStatus", () => {
     }
   });
 
-  function tool(name: string, banner: string): string {
+  // The path only needs to EXIST (findFfBinary checks existsSync); the version
+  // comes from the stubbed runner, never from executing the file.
+  function tool(name: string): string {
     const path = join(dir, name);
-    writeFileSync(path, `#!/bin/sh\necho "${banner}"\n`);
-    chmodSync(path, 0o755);
+    writeFileSync(path, "stub");
     return path;
   }
 
   it("reports found tools with path and version, and the ready Chrome", async () => {
-    const ffmpeg = tool("ffmpeg", "ffmpeg version 9.0.2 Copyright");
+    const ffmpeg = tool("ffmpeg");
     process.env.HYPERFRAMES_FFMPEG_PATH = ffmpeg;
-    process.env.HYPERFRAMES_FFPROBE_PATH = tool("ffprobe", "ffprobe version 9.0.2 Copyright");
+    process.env.HYPERFRAMES_FFPROBE_PATH = tool("ffprobe");
     vi.spyOn(manager, "findReadyManagedBrowser").mockResolvedValue({
       executablePath: "/cache/chrome-headless-shell",
       source: "cache",
@@ -84,9 +105,8 @@ describe("collectToolStatus", () => {
   });
 
   it("does not call a file that fails to run found", async () => {
-    const path = join(dir, "ffmpeg");
-    writeFileSync(path, "#!/bin/sh\nexit 3\n");
-    chmodSync(path, 0o755);
+    const path = tool("ffmpeg");
+    runProcess.mockRejectedValue(new Error("exit 3"));
     process.env.HYPERFRAMES_FFMPEG_PATH = path;
     process.env.HYPERFRAMES_FFPROBE_PATH = join(dir, "missing");
     vi.spyOn(manager, "findReadyManagedBrowser").mockResolvedValue(undefined);

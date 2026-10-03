@@ -5,6 +5,7 @@ import { Button, IconButton, Kbd, Tooltip } from "../../components/ui";
 import { useContextMenuDismiss } from "../../hooks/useContextMenuDismiss";
 import { formatNumber, isTranslationKey, useTranslation, type TranslationKey } from "../../i18n";
 import { DEFAULT_SHORTCUT_SECTIONS, type ShortcutSection } from "./studioShortcuts";
+import { platformKey, resolveShortcutKey } from "../../utils/platform";
 
 const SECTION_HEADING = "mx-3 mt-3 mb-1 text-xs font-semibold text-fg-3";
 
@@ -30,7 +31,8 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
   sections = DEFAULT_SHORTCUT_SECTIONS,
 }: ShortcutsPanelProps) {
   const { t } = useTranslation();
-  const text = (value: string) => (isTranslationKey(value) ? t(value) : value);
+  const text = (value: string) =>
+    isTranslationKey(value) ? t(platformKey(value)) : resolveShortcutKey(value);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [jumpFrame, setJumpFrame] = useState("");
   const shortcutsPanelId = useId();

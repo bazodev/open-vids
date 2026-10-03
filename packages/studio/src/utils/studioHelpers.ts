@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { isMacPlatform } from "./platform";
 import { buildProjectApiPath } from "./projectRouting";
 import { isTypingTarget } from "./typingTarget";
 import type { TimelineElement } from "../player/store/playerStore";
@@ -112,9 +113,7 @@ export function shouldIgnoreHistoryShortcut(target: EventTarget | null): boolean
 }
 
 function getHistoryShortcutLabel(action: "undo" | "redo"): string {
-  const isMac =
-    typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
-  const modifier = isMac ? "Cmd" : "Ctrl";
+  const modifier = isMacPlatform() ? "Cmd" : "Ctrl";
   return action === "undo" ? `${modifier}+Z` : `${modifier}+Shift+Z`;
 }
 

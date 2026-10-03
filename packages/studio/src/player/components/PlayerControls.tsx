@@ -6,6 +6,7 @@ import { formatFrameTime, formatTime, stepFrameTime, STUDIO_PREVIEW_FPS } from "
 import { liveTime, usePlayerStore } from "../store/playerStore";
 import { IconButton, Tooltip, buttonBase, cn } from "../../components/ui";
 import { useTranslation } from "../../i18n";
+import { resolveShortcutKey } from "../../utils/platform";
 import { useMountEffect } from "../../hooks/useMountEffect";
 import { ShortcutsPanel } from "./ShortcutsPanel";
 import type { ShortcutSection } from "./studioShortcuts";
@@ -193,7 +194,7 @@ export const PlayerControls = memo(function PlayerControls({
           />
         </Tooltip>
         <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
-        <Tooltip label={t("player.controls.loop")} shortcut="⇧L">
+        <Tooltip label={t("player.controls.loop")} shortcut={resolveShortcutKey("⇧L")}>
           <IconButton
             aria-label={
               loopEnabled ? t("player.controls.loopDisable") : t("player.controls.loopEnable")

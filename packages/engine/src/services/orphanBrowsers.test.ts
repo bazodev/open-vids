@@ -24,6 +24,9 @@ const root = () => {
 async function sleeper(label: string): Promise<ChildProcess & { pid: number }> {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", label], {
     stdio: "ignore",
+    // A GUI-launched test run has no console; without this every sleeper
+    // flashes one on Windows. No-op on POSIX.
+    windowsHide: true,
   });
   children.push(child);
   await once(child, "spawn");

@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AppPreferencesStore, defaultAppPreferences } from "../app/preferences.js";
+import {
+  AppPreferencesStore,
+  defaultAppPreferences,
+  defaultProjectLocation,
+  migrateLegacyProjectLocation,
+} from "../app/preferences.js";
 import { registerAppPreferencesRoutes } from "./appPreferences.js";
 
 let dir: string;
@@ -67,10 +72,41 @@ describe("app preferences route", () => {
         width: 1920,
         height: 1920,
         openIn: "story",
-        location: "~/Movies/OpenVids",
+        location: defaultProjectLocation(),
         extra: true,
       },
     });
+  });
+
+  it("defaults the project folder per platform and migrates only the legacy Windows default", async () => {
+    expect(defaultAppPreferences("win32").newProject.location).toBe("~/Documents/OpenVids");
+    expect(defaultAppPreferences("darwin").newProject.location).toBe("~/Movies/OpenVids");
+    expect(defaultAppPreferences("linux").newProject.location).toBe("~/Movies/OpenVids");
+    const home = "C:\\Users\\Alice";
+    for (const legacy of [
+      "~/Movies/OpenVids",
+      "~\\Movies\\OpenVids",
+      "c:\\users\\alice\\movies\\openvids",
+      "C:/Users/Alice/Movies/OpenVids",
+    ]) {
+      expect(migrateLegacyProjectLocation(legacy, "win32", home)).toBe("~/Documents/OpenVids");
+      expect(migrateLegacyProjectLocation(legacy, "darwin", home)).toBeUndefined();
+    }
+    expect(migrateLegacyProjectLocation("D:\\Work", "win32", home)).toBeUndefined();
+    expect(migrateLegacyProjectLocation("~/Videos/OpenVids", "win32", home)).toBeUndefined();
+  });
+
+  it("rewrites the legacy default only on Windows and preserves custom locations", async () => {
+    writeFileSync(path, JSON.stringify({ newProject: { location: "~/Movies/OpenVids" } }));
+    const value = await get();
+    if (process.platform === "win32") {
+      expect(value.newProject.location).toBe("~/Documents/OpenVids");
+      expect(stored()).toMatchObject({ newProject: { location: "~/Documents/OpenVids" } });
+    } else {
+      expect(value.newProject.location).toBe("~/Movies/OpenVids");
+    }
+    writeFileSync(path, JSON.stringify({ newProject: { location: "D:\\Work" } }));
+    expect((await get()).newProject.location).toBe("D:\\Work");
   });
 
   it("stores the language choice", async () => {
@@ -192,6 +228,33 @@ describe("app preferences route", () => {
     expect(body.error.message).toContain(key);
     expect(body.error.params?.key).toBe(key);
     expect(stored()).toEqual({ theme: "dark" });
+  });
+
+  it.each([
+    "C:\\Users\\me\\Movies\\OpenVids",
+    "C:/Users/me/Movies/OpenVids",
+    "\\\\server\\share\\OpenVids",
+    "~\\Movies\\OpenVids",
+    "C:",
+  ])("accepts the Windows location %s on win32 only", async (location) => {
+    const response = await put({ newProject: { location } });
+    if (process.platform === "win32") {
+      expect(response.status).toBe(200);
+      expect(stored()).toMatchObject({
+        newProject: {
+          location: location === "~\\Movies\\OpenVids" ? "~/Documents/OpenVids" : location,
+        },
+      });
+    } else {
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it("accepts POSIX locations on every platform", async () => {
+    for (const location of ["/x", "~/Movies/OpenVids"]) {
+      const response = await put({ newProject: { location } });
+      expect(response.status).toBe(200);
+    }
   });
 
   it("refuses a body that is not a JSON object", async () => {

@@ -11,6 +11,8 @@ import { useDockLayoutStore } from "../dock/dockLayoutStore";
 import { cn } from "../ui/cn";
 import { useTranslation } from "../../i18n";
 import { Kbd } from "../ui/Kbd";
+import { resolveShortcutKey } from "../../utils/platform";
+import { resolveModifierKey } from "../../utils/keyMatch";
 import { AgentsMenu } from "./AgentsMenu";
 import { ConnectModelButton, MANUAL_EDITOR_NOTE, NO_MODEL_SENTENCE } from "./ConnectModel";
 import { chatAgentName } from "./AgentMonogram";
@@ -129,7 +131,7 @@ export function Composer() {
     const panel = portal?.parentElement;
     if (!panel) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key !== ".") return;
+      if (!(event.metaKey || event.ctrlKey) || resolveModifierKey(event) !== ".") return;
       if (!stopRef.current.running) return;
       event.preventDefault();
       event.stopPropagation();
@@ -281,7 +283,7 @@ export function Composer() {
                 key="stop"
                 type="button"
                 aria-label={t("chat.composer.stopTask")}
-                title={t("chat.composer.stopTaskTitle", { key: "⌘." })}
+                title={t("chat.composer.stopTaskTitle", { key: resolveShortcutKey("⌘.") })}
                 disabled={pending === "abort"}
                 onClick={() => void abort()}
                 className={cn(
@@ -293,7 +295,9 @@ export function Composer() {
               >
                 <Stop size={12} weight="fill" aria-hidden />
                 <span>{t("chat.composer.stop")}</span>
-                <Kbd className="h-3.5 px-[3px] text-2xs @max-[439px]/composer:hidden">⌘.</Kbd>
+                <Kbd className="h-3.5 px-[3px] text-2xs @max-[439px]/composer:hidden">
+                  {resolveShortcutKey("⌘.")}
+                </Kbd>
               </button>
             ) : mode === "steer" ? (
               <button

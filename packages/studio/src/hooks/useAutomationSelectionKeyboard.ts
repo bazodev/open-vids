@@ -36,6 +36,7 @@ import type {
   AutomationLaneBinding,
   UseAutomationLanesResult,
 } from "../player/components/useAutomationLanes";
+import { resolveModifierKey } from "../utils/keyMatch";
 
 type PlayerState = ReturnType<typeof usePlayerStore.getState>;
 
@@ -47,14 +48,15 @@ function isTextInput(el: Element | null): boolean {
 }
 
 /**
- * A Cmd/Ctrl+<letter> chord. `e.key` is normalised because CapsLock makes it
- * "V"/"C", and useAppHotkeys already lowercases — a raw `e.key === "v"` test
- * would silently drop the keystroke here while that dispatcher still acted on
- * it. Shift and Alt are excluded for the same parity reason (useAppHotkeys
- * gates its own copy/paste on `!shiftKey && !altKey`).
+ * A Cmd/Ctrl+<letter> chord. The letter resolves through the shared
+ * layout-independent matcher, so a Russian Ctrl+chord still claims the lane
+ * on Windows the same way the central dispatcher does; CapsLock still
+ * normalises through the lowercase. Shift and Alt are excluded for the same
+ * parity reason (useAppHotkeys gates its own copy/paste on
+ * `!shiftKey && !altKey`).
  */
 function isChord(e: KeyboardEvent, letter: string): boolean {
-  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === letter;
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && resolveModifierKey(e) === letter;
 }
 
 /** A `TimelineElement`'s identity as the selection and lane bindings key by. */

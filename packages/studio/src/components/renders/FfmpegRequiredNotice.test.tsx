@@ -28,6 +28,9 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  // No desktop shell by default: the notice is the standalone download wording.
+  window.history.replaceState(null, "", "/");
+  vi.stubGlobal("navigator", { platform: "MacIntel" });
 });
 
 afterEach(() => {
@@ -35,6 +38,7 @@ afterEach(() => {
   root = null;
   document.body.innerHTML = "";
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 function render(props: {
@@ -101,5 +105,24 @@ describe("FfmpegRequiredNotice", () => {
 
     expect(host.querySelector("code")).toBeNull();
     expect(host.textContent).toContain("See the download page.");
+  });
+
+  it("keeps the download wording on macOS even inside the desktop shell", () => {
+    window.history.replaceState(null, "", "/?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035");
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    render({});
+
+    expect(host.textContent).toContain("Other install options");
+    expect(host.textContent).not.toContain("Open Projects setup");
+  });
+
+  it("links back to the Projects setup on Windows instead of the download page", () => {
+    window.history.replaceState(null, "", "/?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035");
+    vi.stubGlobal("navigator", { platform: "Win32" });
+    render({});
+
+    expect(host.querySelector("code")?.textContent).toBe("brew install ffmpeg");
+    expect(host.textContent).toContain("Open Projects setup");
+    expect(host.textContent).not.toContain("Other install options");
   });
 });

@@ -4,6 +4,7 @@ import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { isTypingTarget } from "../utils/typingTarget";
 import { useCaptionStore } from "../captions/store";
+import { resolveModifierKey } from "../utils/keyMatch";
 import {
   applyCaptionModelToIframe,
   isCaptionPreviewVisible,
@@ -231,13 +232,14 @@ export function useAppHotkeys({
 
   const handleAppKeyDown = useCallback((event: KeyboardEvent) => {
     const cb = cbRef.current;
-    const key = event.key.toLowerCase();
     if (event.metaKey || event.ctrlKey) {
       if (dispatchStoryHistoryKey(event)) return;
-      dispatchModifierKey(event, key, cb);
+      dispatchModifierKey(event, resolveModifierKey(event), cb);
       return;
     }
-    if (!isTypingTarget(event.target)) dispatchPlainKey(event, key, cb);
+    // Plain keys stay on `event.key`: layout-independence is for modifier
+    // chords only, so a Russian letter never triggers a single-key tool.
+    if (!isTypingTarget(event.target)) dispatchPlainKey(event, event.key.toLowerCase(), cb);
   }, []);
 
   // eslint-disable-next-line no-restricted-syntax

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   PROVENANCE_PATH,
   WEBSITE_LIMITS,
@@ -39,7 +39,12 @@ async function failure(promise: Promise<unknown>): Promise<{ code: string; messa
 
 const webFiles = (f: ResearchFixture): string[] => {
   const dir = join(f.project.dir, "assets/web");
-  return existsSync(dir) ? readdirSync(dir, { recursive: true, encoding: "utf8" }).sort() : [];
+  // readdir joins with the platform separator; the wire and the assertions use "/".
+  return existsSync(dir)
+    ? readdirSync(dir, { recursive: true, encoding: "utf8" })
+        .map((entry) => entry.split(sep).join("/"))
+        .sort()
+    : [];
 };
 
 const LOTTIE = JSON.stringify({ v: "5.7.4", fr: 30, ip: 0, op: 90, layers: [] });

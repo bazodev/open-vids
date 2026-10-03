@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from "react";
 import { useTranslation } from "../../i18n";
+import { shiftKeyLabel } from "../../utils/platform";
 import { useCaptionStore } from "../store";
 import type { CaptionSegment, CaptionStyle } from "../types";
 import { CaptionAnimationPanel } from "./CaptionAnimationPanel";
@@ -228,7 +229,10 @@ export const CaptionPropertyPanel = memo(function CaptionPropertyPanel({
         <div className="flex min-w-0 items-baseline gap-1.5 text-xs font-semibold text-fg-2">
           {t("captions.panel.words")}
           <span className="truncate font-normal text-fg-3">
-            {t("captions.panel.selectionHint", { count: selectedSegmentIds.size, key: "⇧" })}
+            {t("captions.panel.selectionHint", {
+              count: selectedSegmentIds.size,
+              key: shiftKeyLabel(),
+            })}
           </span>
         </div>
         {ownerWords.length > 0 && (

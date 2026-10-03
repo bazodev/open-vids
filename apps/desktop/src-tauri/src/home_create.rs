@@ -22,7 +22,8 @@ pub fn handle_create(stream: &mut TcpStream, state: &Arc<Mutex<HomeInner>>, body
             return;
         }
     };
-    // The default location (`~/Movies/OpenVids`) may not exist yet on a
+    // The default location (`~/Documents/OpenVids` on Windows,
+    // `~/Movies/OpenVids` elsewhere) may not exist yet on a
     // fresh machine; it is ours to create. Any other parent must exist.
     let prefs = super::prefs::load(&super::prefs::prefs_path());
     let defaults = super::prefs::new_project(&prefs);
@@ -31,7 +32,11 @@ pub fn handle_create(stream: &mut TcpStream, state: &Arc<Mutex<HomeInner>>, body
     }
     let workspace = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
-        .and_then(|v| v.get("workspace").and_then(|w| w.as_str()).map(str::to_string))
+        .and_then(|v| {
+            v.get("workspace")
+                .and_then(|w| w.as_str())
+                .map(str::to_string)
+        })
         .filter(|w| super::prefs::WORKSPACES.contains(&w.as_str()))
         .unwrap_or(defaults.open_in);
     match scaffold_blank(&params) {
@@ -124,6 +129,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn parse_accepts_a_full_form() {
         let params = parse_create(&body(
             r#"{"parent":"/tmp/x","name":"my-video","fps":"24","width":1080,"height":1920,"duration":12}"#,
@@ -136,6 +142,21 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn parse_accepts_a_full_form() {
+        let params = parse_create(&body(
+            r#"{"parent":"C:\\tmp\\x","name":"my-video","fps":"24","width":1080,"height":1920,"duration":12}"#,
+        ))
+        .unwrap();
+        assert_eq!(params.name, "my-video");
+        assert_eq!(params.fps, "24");
+        assert_eq!((params.width, params.height), (1080, 1920));
+        assert_eq!(params.duration, 12.0);
+        assert_eq!(params.parent, PathBuf::from(r"C:\tmp\x"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
     fn parse_rejects_an_empty_name_or_size() {
         assert!(parse_create(&body(
             r#"{"parent":"/tmp/x","name":"","width":8,"height":8}"#
@@ -148,6 +169,25 @@ mod tests {
         // Zero sizes pass the JSON shape but fail in `scaffold` validation.
         let params = parse_create(&body(
             r#"{"parent":"/tmp/x","name":"ok","width":0,"height":8}"#,
+        ))
+        .unwrap();
+        assert_eq!(params.width, 0);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn parse_rejects_an_empty_name_or_size() {
+        assert!(parse_create(&body(
+            r#"{"parent":"C:\\tmp\\x","name":"","width":8,"height":8}"#
+        ))
+        .is_err());
+        assert!(parse_create(&body(
+            r#"{"parent":"C:\\tmp\\x","name":"ok","width":0,"height":8}"#
+        ))
+        .is_ok());
+        // Zero sizes pass the JSON shape but fail in `scaffold` validation.
+        let params = parse_create(&body(
+            r#"{"parent":"C:\\tmp\\x","name":"ok","width":0,"height":8}"#,
         ))
         .unwrap();
         assert_eq!(params.width, 0);

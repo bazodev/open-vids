@@ -227,6 +227,28 @@ describe("activeServerOnPort — PID provenance (security)", () => {
     expect(server?.pid).toBe(String(process.pid));
     expect(server?.pidSource).toBe("os");
   });
+
+  it.runIf(process.platform === "win32")(
+    "finds the real listener through netstat on Windows",
+    async () => {
+      // The win32 branch parses `netstat -ano` instead of `lsof -ti`. A live
+      // loopback listener must resolve to this process's own pid — run, don't
+      // just read, the branch.
+      const port = await startConfigProbeServer({
+        isHyperframes: true,
+        projectName: "demo-project",
+        projectDir: "C:\\demo-project",
+        serverBuildSignature: null,
+        version: "0.6.42",
+        pid: 999_999,
+      });
+
+      const server = await activeServerOnPort(port);
+
+      expect(server?.pid).toBe(String(process.pid));
+      expect(server?.pidSource).toBe("os");
+    },
+  );
 });
 
 describe("detectHyperframesServer", () => {

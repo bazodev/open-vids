@@ -78,7 +78,8 @@ describe("buildCaptionsComposition", () => {
 
 describe("captionSkinPath", () => {
   it("only resolves folders of the skins directory", () => {
-    expect(captionSkinPath(SKINS, "coral")).toMatch(/coral\/caption-skin\.html$/);
+    // Backslash-separated on Windows: accept either separator.
+    expect(captionSkinPath(SKINS, "coral")).toMatch(/coral[/\\]caption-skin\.html$/);
     expect(captionSkinPath(SKINS, "../coral")).toBeNull();
     expect(captionSkinPath(SKINS, "coral/../coral")).toBeNull();
     expect(captionSkinPath(SKINS, "missing")).toBeNull();

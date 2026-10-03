@@ -172,6 +172,19 @@ describe("stripJsStringLiterals scaling", () => {
     const cpuMs = (n: number) => {
       const src = "a=b/c;".repeat(n);
       stripJsStringLiterals(src); // warm up before the first sample
+      // `process.cpuUsage` ticks at ~15.6 ms on Windows, so a single fast
+      // scan samples as 0 ms and the ratio divides by zero. Average a batch
+      // of scans per sample there instead; wall time is fine for a ratio
+      // over batches this large (8x input still measures ~8x).
+      if (process.platform === "win32") {
+        let best = Infinity;
+        for (let run = 0; run < 5; run += 1) {
+          const started = performance.now();
+          for (let rep = 0; rep < 15; rep += 1) stripJsStringLiterals(src);
+          best = Math.min(best, (performance.now() - started) / 15);
+        }
+        return best;
+      }
       let best = Infinity;
       for (let run = 0; run < 5; run += 1) {
         const started = process.cpuUsage();

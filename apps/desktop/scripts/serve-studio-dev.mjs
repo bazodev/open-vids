@@ -18,7 +18,7 @@
  * a stale server surfaces as a hard failure instead of a silent port shift.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readlinkSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,7 +76,14 @@ function linkProject(projectDir) {
     }
   }
   if (!existsSync(linkPath)) {
-    spawnSync("ln", ["-sfn", dir, linkPath], { stdio: "inherit" });
+    if (process.platform === "win32") {
+      // `ln -sfn` does not exist on Windows and "dir" symlinks need
+      // Developer Mode or elevation; NTFS junctions are unprivileged and keep
+      // the live write-back the studio needs.
+      symlinkSync(dir, linkPath, "junction");
+    } else {
+      spawnSync("ln", ["-sfn", dir, linkPath], { stdio: "inherit" });
+    }
     log(`linked project ${name} -> ${dir}`);
     return { name, created: true };
   }
@@ -123,8 +130,24 @@ log(
     (linked ? ` (#project/${linked.name})` : ""),
 );
 
-const child = spawn("bun", args, { cwd: REPO_ROOT, stdio: "inherit" });
+const child = spawn("bun", args, { cwd: REPO_ROOT, stdio: "inherit", windowsHide: true });
 child.on("exit", (code, signal) => process.exit(signal ? 1 : (code ?? 0)));
 for (const sig of ["SIGINT", "SIGTERM"]) {
-  process.on(sig, () => child.kill(sig));
+  process.on(sig, () => {
+    if (process.platform === "win32" && child.pid !== undefined) {
+      // A signal only reaches the direct child on Windows; reap the whole
+      // dev-server tree (Vite + Chrome) so Ctrl+C leaves nothing behind.
+      try {
+        const result = spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+          timeout: 10_000,
+        });
+        if (result.status === 0) return;
+      } catch {
+        // Fall through to the direct kill below.
+      }
+    }
+    child.kill(sig);
+  });
 }

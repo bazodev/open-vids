@@ -95,9 +95,24 @@
             open = false;
           /* The window underneath stays unreachable until the split: no Tab stops, no ⌘N / ⌘O behind the splash. */
           const lock = (on) => {
-            for (const el of win.children)
-              if (el !== launch && el.id !== "ob" && el.tagName !== "SCRIPT")
-                el.inert = on || root.classList.contains("is-onboarding");
+            const hold = on || root.classList.contains("is-onboarding");
+            for (const el of win.children) {
+              if (el === launch || el.id === "ob" || el.tagName === "SCRIPT") continue;
+              /* The custom frame's window buttons stay usable under the lock. */
+              if (el.classList.contains("titlebar")) {
+                for (const part of el.children)
+                  if (
+                    part.id !== "winControls" &&
+                    part.id !== "appMenuBtn" &&
+                    part.id !== "menuBar"
+                  )
+                    part.inert = hold;
+                const mid = el.querySelector("#tb-mid");
+                if (mid) mid.inert = hold;
+                continue;
+              }
+              el.inert = hold;
+            }
           };
           document.addEventListener("DOMContentLoaded", () => {
             if (!open) lock(true);
@@ -148,8 +163,117 @@
       </script>
 
       <header class="titlebar" data-tauri-drag-region>
-        <div class="tl-group" aria-hidden="true" data-tauri-drag-region></div>
-        <div class="brand" data-tauri-drag-region="deep">
+        <!-- Windows custom frame only (shown by home.js when OV.isCustomFrame()): the app menu button.
+          A 36x36 hit area whose 21 px mark stays inside it (`.app-mark`); no
+          underline spill, focus ring inside. A real button, tabbable, opening
+          the compact form of the menu bar. macOS never shows it. -->
+        <button
+          class="app-menu-btn"
+          id="appMenuBtn"
+          type="button"
+          aria-label="Application menu"
+          data-i18n-aria-label="menu.app.menu"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          hidden
+        >
+          <svg class="app-mark" viewBox="-3 -46.45 103.92 77.25" aria-hidden="true">
+            <circle
+              cx="22.36"
+              cy="-21.09"
+              r="19.26"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="6.2"
+            />
+            <circle cx="22.36" cy="-21.09" r="6.54" fill="currentColor" stroke="none" />
+            <rect
+              x="0"
+              y="19.2"
+              width="68.32"
+              height="3.6"
+              rx="1.8"
+              fill="currentColor"
+              stroke="none"
+            />
+            <rect
+              x="68.32"
+              y="19.2"
+              width="29.61"
+              height="3.6"
+              rx="1.8"
+              fill="currentColor"
+              fill-opacity=".3"
+              stroke="none"
+            />
+            <path
+              d="M68.32 -13.68 V27.80"
+              stroke="var(--accent)"
+              stroke-width="3.4"
+              stroke-linecap="round"
+              fill="none"
+            />
+            <path
+              d="M52.32 -40.08 L84.32 -40.08 L68.32 -9.48Z"
+              fill="var(--accent)"
+              stroke="var(--accent)"
+              stroke-width="4.2"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        <!-- Windows custom frame only (shown by home.js when OV.isCustomFrame()): the plain-text menu bar
+          (File Edit View Window Help) wearing the toolbar's own button shape. Replaces the single
+          dropdown with a real menu bar; once a menu is open, hovering another label switches to it,
+          and Left/Right move between labels. macOS keeps its native bar and never draws this. -->
+        <nav class="menubar" id="menuBar" aria-label="Application menus" hidden>
+          <button
+            class="menubar-item"
+            type="button"
+            data-menu="file"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            <span data-i18n="menu.file.title">File</span>
+          </button>
+          <button
+            class="menubar-item"
+            type="button"
+            data-menu="edit"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            <span data-i18n="menu.edit.title">Edit</span>
+          </button>
+          <button
+            class="menubar-item"
+            type="button"
+            data-menu="view"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            <span data-i18n="menu.view.title">View</span>
+          </button>
+          <button
+            class="menubar-item"
+            type="button"
+            data-menu="window"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            <span data-i18n="menu.window.title">Window</span>
+          </button>
+          <button
+            class="menubar-item"
+            type="button"
+            data-menu="help"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            <span data-i18n="menu.help.title">Help</span>
+          </button>
+        </nav>
+        <div class="brand" data-tauri-drag-region="deep" id="brandWordmark">
           <svg
             viewBox="-3.00 -46.45 271.58 77.25"
             role="img"
@@ -199,99 +323,142 @@
             />
           </svg>
         </div>
-        <div class="tb-spacer" data-tauri-drag-region></div>
-        <div
-          class="tb-tools"
-          id="tb-tools"
-          role="toolbar"
-          aria-label="Projects toolbar"
-          data-i18n-aria-label="home.toolbar.label"
-        >
-          <div class="field" id="field">
-            <span id="fieldIcon"></span>
-            <input
-              id="search"
-              type="text"
-              placeholder="Search projects"
-              data-i18n-placeholder="home.search.placeholder"
-              aria-label="Search projects"
-              data-i18n-aria-label="home.search.label"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <span class="kbd">⌘F</span>
-            <button
-              class="clear"
-              id="clearSearch"
-              type="button"
-              aria-label="Clear search"
-              data-i18n-aria-label="home.search.clear"
-            ></button>
-          </div>
+        <div class="tb-mid" id="tb-mid">
           <div
-            class="seg"
-            role="group"
-            aria-label="View mode"
-            data-i18n-aria-label="home.view.label"
+            class="tb-side tb-new"
+            id="tb-new"
+            role="toolbar"
+            aria-label="Projects toolbar"
+            data-i18n-aria-label="home.toolbar.label"
           >
             <button
-              id="viewGrid"
+              class="btn"
+              id="openBtn"
               type="button"
-              aria-pressed="true"
-              aria-label="Grid view"
-              data-i18n-aria-label="home.view.grid"
-              data-tip="Grid view"
-              data-tip-i18n="home.view.grid"
-              data-kbd="⌘1"
+              data-tip="Open an existing project from disk"
+              data-tip-i18n="home.toolbar.openTip"
+              data-kbd="⌘O"
+              data-tip-align="end"
             ></button>
             <button
-              id="viewList"
+              class="btn"
+              id="newBtn"
               type="button"
-              aria-pressed="false"
-              aria-label="List view"
-              data-i18n-aria-label="home.view.list"
-              data-tip="List view"
-              data-tip-i18n="home.view.list"
-              data-kbd="⌘2"
+              data-tip="Create a new project"
+              data-tip-i18n="home.toolbar.newTip"
+              data-kbd="⌘N"
+              data-tip-align="end"
             ></button>
           </div>
+          <div class="tb-search-center">
+            <div class="field" id="field">
+              <span id="fieldIcon"></span>
+              <input
+                id="search"
+                type="text"
+                placeholder="Search projects"
+                data-i18n-placeholder="home.search.placeholder"
+                aria-label="Search projects"
+                data-i18n-aria-label="home.search.label"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <span class="kbd">⌘F</span>
+              <button
+                class="clear"
+                id="clearSearch"
+                type="button"
+                aria-label="Clear search"
+                data-i18n-aria-label="home.search.clear"
+              ></button>
+            </div>
+          </div>
+          <div
+            class="tb-side tb-view"
+            id="tb-tools"
+            role="toolbar"
+            aria-label="Projects toolbar"
+            data-i18n-aria-label="home.toolbar.label"
+          >
+            <div
+              class="seg"
+              role="group"
+              aria-label="View mode"
+              data-i18n-aria-label="home.view.label"
+            >
+              <button
+                id="viewGrid"
+                type="button"
+                aria-pressed="true"
+                aria-label="Grid view"
+                data-i18n-aria-label="home.view.grid"
+                data-tip="Grid view"
+                data-tip-i18n="home.view.grid"
+                data-kbd="⌘1"
+              ></button>
+              <button
+                id="viewList"
+                type="button"
+                aria-pressed="false"
+                aria-label="List view"
+                data-i18n-aria-label="home.view.list"
+                data-tip="List view"
+                data-tip-i18n="home.view.list"
+                data-kbd="⌘2"
+              ></button>
+            </div>
+            <button
+              class="icon-btn"
+              id="settingsBtn"
+              type="button"
+              aria-label="Settings"
+              data-i18n-aria-label="home.toolbar.settings"
+              data-tip="Settings"
+              data-tip-i18n="home.toolbar.settings"
+              data-kbd="⌘,"
+            ></button>
+            <button
+              class="icon-btn"
+              id="reportBtn"
+              type="button"
+              aria-label="Report a problem"
+              data-i18n-aria-label="home.toolbar.report"
+              data-tip="Report a problem"
+              data-tip-i18n="home.toolbar.report"
+            ></button>
+          </div>
+        </div>
+        <!-- Windows custom frame only (shown by home.js when OV.isCustomFrame()):
+          minimize / maximize-restore / close flush with the window's right
+          edge. Direct header children AFTER #tb-mid (not inside it): the
+          centred row sizes itself, and anything inside it would drag the
+          row off centre or push the buttons out of reach on narrow windows.
+          macOS keeps the overlay traffic lights over .tl-group instead. -->
+        <span class="tb-sep win-controls-sep" aria-hidden="true" hidden></span>
+        <div class="win-controls" id="winControls" role="toolbar" aria-label="Window" hidden>
           <button
-            class="icon-btn"
-            id="settingsBtn"
+            class="win-btn"
+            id="winMin"
             type="button"
-            aria-label="Settings"
-            data-i18n-aria-label="home.toolbar.settings"
-            data-tip="Settings"
-            data-tip-i18n="home.toolbar.settings"
-            data-kbd="⌘,"
+            tabindex="-1"
+            aria-label="Minimize"
+            data-i18n-aria-label="window.controls.minimize"
           ></button>
           <button
-            class="icon-btn"
-            id="reportBtn"
+            class="win-btn"
+            id="winMax"
             type="button"
-            aria-label="Report a problem"
-            data-i18n-aria-label="home.toolbar.report"
-            data-tip="Report a problem"
-            data-tip-i18n="home.toolbar.report"
-          ></button>
-          <span class="tb-sep" aria-hidden="true"></span>
-          <button
-            class="btn"
-            id="openBtn"
-            type="button"
-            data-tip="Open an existing project from disk"
-            data-tip-i18n="home.toolbar.openTip"
-            data-kbd="⌘O"
-            data-tip-align="end"
+            tabindex="-1"
+            aria-label="Maximize"
+            data-i18n-aria-label="window.controls.maximize"
           ></button>
           <button
-            class="btn"
-            id="newBtn"
+            class="win-btn close"
+            id="winClose"
             type="button"
-            data-tip="Create a new project"
-            data-tip-i18n="home.toolbar.newTip"
-            data-kbd="⌘N"
-            data-tip-align="end"
+            tabindex="-1"
+            aria-label="Close"
+            data-i18n-aria-label="window.controls.close"
           ></button>
         </div>
       </header>

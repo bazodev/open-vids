@@ -16,13 +16,16 @@
 //!   answers the state.
 //! - `POST /api/system/install/chrome/cancel` — cancel it; answers the state.
 //! - `GET|POST /api/system/install/ffmpeg`, `POST …/ffmpeg/cancel` — the same
-//!   three for FFmpeg, installed with Homebrew only (`ffmpeg_install`). The
-//!   state has `detail`, brew's current output line, instead of byte counts.
-//!   `POST` answers 409 `{error}` when Homebrew is not installed.
+//!   three for FFmpeg (`ffmpeg_install`). On macOS it runs Homebrew and the
+//!   state carries `detail` (brew's current output line) instead of byte
+//!   counts; `POST` answers 409 `{error}` when Homebrew is not installed. On
+//!   Windows it downloads the official build into `~/.openvids/ffmpeg` with
+//!   byte progress, and `POST` always starts it.
 //!
-//! The check also carries `homebrew: {found, path, installCommand, note, url}`;
-//! `ffmpeg`/`ffprobe` have `canInstall` (Homebrew found and the tool missing)
-//! and `installer` (`"homebrew"` when `canInstall`, else `null`).
+//! The check also carries `homebrew: {found, path, installCommand, note, url}`
+//! (macOS only; `found` is false elsewhere). `ffmpeg`/`ffprobe` have
+//! `canInstall` and `installer` (`"homebrew"` when Homebrew is there and the
+//! tool is missing, `"download"` when the Windows build is missing, else `null`).
 
 use std::net::TcpStream;
 use std::path::Path;
@@ -93,6 +96,8 @@ pub fn build_check(
     let env_of = |name: &str| std::env::var(name).ok();
     let ffmpeg_env = env_of("HYPERFRAMES_FFMPEG_PATH");
     let ffprobe_env = env_of("HYPERFRAMES_FFPROBE_PATH");
+    let managed_root = ffmpeg_install::managed_dir();
+    let ff_roots = [managed_root.as_path()];
     let chrome_roots = [chrome_cache.as_path()];
     let mut chrome_json = tool_json(
         tools.get("chrome").unwrap_or(&Value::Null),
@@ -103,9 +108,24 @@ pub fn build_check(
         (!(cfg!(target_os = "linux") && cfg!(target_arch = "aarch64"))).then_some("download"),
     );
     chrome_json["systemPath"] = json!(tools.get("chrome").and_then(|c| text(c, "systemPath")));
+    // The downloaded Windows build is one install for both tools. A previous
+    // download counts as found even when the long-lived CLI has not re-run:
+    // `managed_env` (what the sidecars spawn with) is the source of truth.
+    let managed_ffmpeg = ffmpeg_install::managed_ffmpeg();
+    let managed_ffprobe = ffmpeg_install::managed_ffprobe();
     let ff_installer = |name: &str| {
         let found = tools.get(name).and_then(|t| t.get("found")).and_then(Value::as_bool) == Some(true);
-        (brew.is_some() && !found).then_some("homebrew")
+        if found {
+            return None;
+        }
+        if cfg!(windows) {
+            let managed = if name == "ffprobe" { &managed_ffprobe } else { &managed_ffmpeg };
+            if managed.is_some() {
+                return None;
+            }
+            return Some("download");
+        }
+        (brew.is_some()).then_some("homebrew")
     };
     json!({
         "platform": std::env::consts::OS,
@@ -113,15 +133,14 @@ pub fn build_check(
         "chrome": chrome_json,
         // FFmpeg is installed with Homebrew or not at all; one `brew install
         // ffmpeg` provides both tools. Anything not under an OpenVids-owned
-        // directory is the user's own.
         "ffmpeg": tool_json(
             tools.get("ffmpeg").unwrap_or(&Value::Null),
-            |path, _| classify_source(path, ffmpeg_env.as_deref(), &[]),
+            |path, _| classify_source(path, ffmpeg_env.as_deref(), &ff_roots),
             ff_installer("ffmpeg"),
         ),
         "ffprobe": tool_json(
             tools.get("ffprobe").unwrap_or(&Value::Null),
-            |path, _| classify_source(path, ffprobe_env.as_deref(), &[]),
+            |path, _| classify_source(path, ffprobe_env.as_deref(), &ff_roots),
             ff_installer("ffprobe"),
         ),
         "homebrew": {
@@ -168,10 +187,17 @@ pub fn handle(stream: &mut TcpStream, method: &str, path: &str) {
             respond_json(stream, 200, &json!(chrome_install::cancel()))
         }
         ("GET", "/api/system/install/ffmpeg") => respond_json(stream, 200, &json!(ffmpeg_install::state())),
-        ("POST", "/api/system/install/ffmpeg") => match ffmpeg_install::find_brew() {
-            Some(_) => respond_json(stream, 200, &json!(ffmpeg_install::start())),
-            None => respond_error(stream, 409, &ffmpeg_install::homebrew_missing()),
-        },
+        ("POST", "/api/system/install/ffmpeg") => {
+            if cfg!(windows) {
+                // Windows has no Homebrew flow: always start the official-build download.
+                respond_json(stream, 200, &json!(ffmpeg_install::start()))
+            } else {
+                match ffmpeg_install::find_brew() {
+                    Some(_) => respond_json(stream, 200, &json!(ffmpeg_install::start())),
+                    None => respond_error(stream, 409, &ffmpeg_install::homebrew_missing()),
+                }
+            }
+        }
         ("POST", "/api/system/install/ffmpeg/cancel") => {
             respond_json(stream, 200, &json!(ffmpeg_install::cancel()))
         }
@@ -190,9 +216,11 @@ pub fn handle(stream: &mut TcpStream, method: &str, path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::cli_runner::tests::with_fake_cli;
 
     #[test]
+    #[cfg(not(windows))]
     fn sources_are_told_apart_by_path_and_override() {
         let tools = Path::new("/home/u/.openvids/tools");
         assert_eq!(
@@ -215,6 +243,33 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn sources_are_told_apart_by_path_and_override() {
+        let tools = Path::new(r"C:\Users\u\.openvids\tools");
+        assert_eq!(
+            classify_source(r"C:\Users\u\.openvids\tools\ffmpeg\9.0.2\ffmpeg.exe", None, &[tools]),
+            "openvids"
+        );
+        assert_eq!(classify_source(r"C:\ProgramData\chocolatey\bin\ffmpeg.exe", None, &[tools]), "system");
+        assert_eq!(
+            classify_source(r"C:\x\my-ffmpeg.exe", Some(r"C:\x\my-ffmpeg.exe"), &[tools]),
+            "env"
+        );
+        // An override that points elsewhere does not make this path "env".
+        assert_eq!(
+            classify_source(r"C:\Windows\ffmpeg.exe", Some(r"C:\x\other.exe"), &[tools]),
+            "system"
+        );
+        assert_eq!(classify_source(r"C:\Windows\ffmpeg.exe", Some("  "), &[tools]), "system");
+        // A sibling directory with the same prefix is not inside the root.
+        assert_eq!(
+            classify_source(r"C:\Users\u\.openvids\tools-evil\ffmpeg.exe", None, &[tools]),
+            "system"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
     fn the_cli_answer_becomes_the_pages_shape() {
         let home = prefs::home_dir();
         let managed = home.join(".cache/hyperframes/chrome/x/chrome-headless-shell");
@@ -268,6 +323,54 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn the_cli_answer_becomes_the_pages_shape() {
+        let _lock = super::ffmpeg_install::FFMPEG_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Windows offers the download installer for missing tools; the managed
+        // Chrome cache still classifies. Isolate the managed dir so the real
+        // ~/.openvids/ffmpeg on this machine cannot flip the assertions.
+        let dir = std::env::temp_dir().join(format!(
+            "openvids-shape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+        ));
+        std::env::set_var("OPENVIDS_FFMPEG_DIR", &dir);
+        let home = prefs::home_dir();
+        let managed = home.join(".cache/hyperframes/chrome/x/chrome-headless-shell.exe");
+        let tools = json!({
+            "ffmpeg": {"found": true, "path": "C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe", "version": "7.1"},
+            "ffprobe": {"found": false},
+            "chrome": {
+                "found": true, "path": managed.to_string_lossy(), "source": "cache",
+                "version": "152.0.7977.30", "systemPath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+            },
+        });
+        let idle = InstallState::IDLE;
+        let check = build_check(&tools, None, &idle, &idle);
+        assert_eq!(check["ffmpeg"]["found"], true);
+        assert_eq!(check["ffmpeg"]["source"], "system");
+        assert_eq!(check["ffmpeg"]["version"], "7.1");
+        assert_eq!(check["ffmpeg"]["canInstall"], false);
+        assert_eq!(check["ffmpeg"]["installer"], Value::Null);
+        assert_eq!(check["ffprobe"]["canInstall"], true);
+        assert_eq!(check["ffprobe"]["installer"], "download");
+        assert_eq!(check["homebrew"]["found"], false);
+        assert_eq!(check["chrome"]["source"], "openvids");
+        assert!(check["chrome"]["systemPath"].as_str().unwrap().contains("Chrome"));
+        // A managed build flips the installer off: nothing left to install.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ffmpeg.exe"), "f").unwrap();
+        std::fs::write(dir.join("ffprobe.exe"), "p").unwrap();
+        let check = build_check(&json!({"ffmpeg": {"found": false}, "ffprobe": {"found": false}, "chrome": {"found": false}}), None, &idle, &idle);
+        assert_eq!(check["ffmpeg"]["canInstall"], false);
+        assert_eq!(check["ffmpeg"]["installer"], Value::Null);
+        std::env::remove_var("OPENVIDS_FFMPEG_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The fake CLI is a `sh` script: unix-only, like the home.rs callers.
+    #[test]
+    #[cfg(unix)]
     fn the_check_asks_the_cli_for_doctor_tools() {
         let script = r#"
 if [ "$1" = "doctor" ] && [ "$2" = "--tools" ]; then
@@ -275,7 +378,6 @@ if [ "$1" = "doctor" ] && [ "$2" = "--tools" ]; then
   echo '{"tools":{"ffmpeg":{"found":true,"path":"/usr/bin/ffmpeg","version":"7.1"},"ffprobe":{"found":false},"chrome":{"found":false}}}'
 else
   exit 9
-fi
 "#;
         let out = with_fake_cli(script, || cli_runner::run(&["doctor", "--tools"], CHECK_TIMEOUT)).unwrap();
         let tools = cli_runner::last_json_line(&out).unwrap()["tools"].clone();

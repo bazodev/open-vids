@@ -3,7 +3,7 @@
 // import-free .mjs so media-use's zero-install test lane can still run it under plain `node`.
 // Regenerate after editing the source: node scripts/generate-media-use-svg-sanitize.mjs
 import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -11,7 +11,9 @@ const ENTRY = resolve(here, "../packages/core/src/figma/sanitizeSvg.ts");
 const OUTFILE = resolve(here, "../packages/cli/src/media-use/lib/svg-sanitize.mjs");
 // scripts/ has no node_modules of its own (bun's per-consumer linking); reach into the one
 // package that already depends on esbuild rather than adding a root-level dependency.
-const { build } = await import(resolve(here, "../packages/core/node_modules/esbuild/lib/main.js"));
+const { build } = await import(
+  pathToFileURL(resolve(here, "../packages/core/node_modules/esbuild/lib/main.js")).href
+);
 
 const HEADER = `// GENERATED — do not hand-edit. Source: packages/core/src/figma/sanitizeSvg.ts, bundled by
 // scripts/generate-media-use-svg-sanitize.mjs so media-use's zero-install \`node --test\` lane can
@@ -31,7 +33,7 @@ export async function generate() {
   return HEADER + result.outputFiles[0].text;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const code = await generate();
   writeFileSync(OUTFILE, code);
   console.log(`wrote ${OUTFILE} (${code.length} bytes)`);

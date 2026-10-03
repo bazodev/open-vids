@@ -10,6 +10,7 @@ import { fieldBase, fieldSizes, fieldText } from "../ui/Input";
 import { SegmentedControl } from "../ui/SegmentedControl";
 import { Spinner } from "../ui/Status";
 import { isRunningLogin, isRunningStatus, type SignInView } from "./useOAuthSignIns";
+import { platformKey } from "../../utils/platform";
 
 /** What the provider row needs to run a sign-in; null for a provider with none. */
 export interface ProviderSignInControls {
@@ -81,7 +82,7 @@ export function SignInStart({
         </p>
       )}
       <p className="m-0 text-xs leading-[15px] text-fg-3 text-pretty">
-        {t("settings.studio.si.storageNote")}
+        {t(platformKey("settings.studio.si.storageNote"))}
       </p>
       {controls.view.failure && controls.view.login === null && (
         <p role="alert" className="m-0 text-xs text-error">

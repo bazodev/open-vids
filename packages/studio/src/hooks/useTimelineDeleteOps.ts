@@ -17,6 +17,7 @@ import {
   resolveShiftedElements,
 } from "../player/components/timelineGapCommit";
 import { t } from "../i18n";
+import { resolveShortcutKey } from "../utils/platform";
 import type {
   TimelineGroupCommitOptions,
   TimelineGroupMoveChange,
@@ -228,7 +229,10 @@ export function useTimelineDeleteOps({
         }
         if (rippleChanges && !rippleFailed && !rippleNoticeShownRef.current) {
           rippleNoticeShownRef.current = true;
-          showToast(t("timeline.toast.rippleNotice", { shortcut: "⌘Z" }), "info");
+          showToast(
+            t("timeline.toast.rippleNotice", { shortcut: resolveShortcutKey("⌘Z") }),
+            "info",
+          );
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : t("timeline.toast.deleteFailed");

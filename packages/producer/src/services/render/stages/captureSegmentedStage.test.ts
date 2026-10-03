@@ -248,7 +248,8 @@ function fakeStageInput(overrides: { totalFrames: number }) {
 
 describe("segmentOutputPath", () => {
   it("zero-pads so lexical order equals frame order", () => {
-    expect(segmentOutputPath("/w/segments", 7)).toBe("/w/segments/segment_00007.mp4");
+    // join() yields OS-native separators, so build the expectation the same way.
+    expect(segmentOutputPath("/w/segments", 7)).toBe(join("/w/segments", "segment_00007.mp4"));
   });
 });
 

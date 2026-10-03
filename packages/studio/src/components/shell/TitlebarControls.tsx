@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowUUpLeft, ArrowUUpRight } from "@phosphor-icons/react";
 import { useStudioShellContext } from "../../contexts/StudioContext";
 import { useTranslation } from "../../i18n";
+import { resolveShortcutKey } from "../../utils/platform";
 import { useStoryStore } from "../../story/storyContext";
 import { useSaveActivityStore } from "../../utils/saveActivity";
 import { useDockLayoutStore } from "../dock/dockLayoutStore";
@@ -57,14 +58,13 @@ export function SaveState() {
 export function HistoryButtons() {
   const { t } = useTranslation();
   const { editHistory, handleUndo, handleRedo } = useStudioShellContext();
-  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
   const steps = [
     {
       verb: "undo",
       can: editHistory.canUndo,
       step: editHistory.undoLabel,
       run: handleUndo,
-      shortcut: mac ? "⌘Z" : "Ctrl+Z",
+      shortcut: resolveShortcutKey("⌘Z"),
       Icon: ArrowUUpLeft,
     },
     {
@@ -72,7 +72,7 @@ export function HistoryButtons() {
       can: editHistory.canRedo,
       step: editHistory.redoLabel,
       run: handleRedo,
-      shortcut: mac ? "⇧⌘Z" : "Ctrl+Shift+Z",
+      shortcut: resolveShortcutKey("⇧⌘Z"),
       Icon: ArrowUUpRight,
     },
   ] as const;

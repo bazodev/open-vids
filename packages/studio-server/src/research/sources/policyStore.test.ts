@@ -44,8 +44,11 @@ describe("the Asset Search policy", () => {
       name: "Openverse (mine)",
       domains: ["api.openverse.org", "openverse.org"],
     });
-    // The file is private to the user.
-    expect(statSync(join(dir, "policy.json")).mode & 0o777).toBe(0o600);
+    // Windows ACLs have no owner-only mode bits (stat reports 0666-style
+    // masks), so the privacy mode is asserted on POSIX only.
+    if (process.platform !== "win32") {
+      expect(statSync(join(dir, "policy.json")).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("adds a user website with normalized domains and lets every field but the built-ins' domains change", () => {

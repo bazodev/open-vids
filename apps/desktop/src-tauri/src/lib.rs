@@ -41,9 +41,13 @@
 //!
 //! Move its own window, nothing more. There is no `withGlobalTauri`; the
 //! capability in `capabilities/main.json` grants the loopback pages (remote
-//! origins as far as Tauri is concerned) only window dragging and the
-//! double-click zoom, for their `data-tauri-drag-region` titlebars under the
-//! overlay title bar. Every file read, write, upload and delete goes through
+//! origins as far as Tauri is concerned) window dragging, the double-click
+//! zoom and — on Windows, where the pages draw their own caption buttons —
+//! minimize / toggle-maximize / close plus reading the maximized state, for
+//! their `data-tauri-drag-region` titlebars. On macOS the overlay title bar
+//! keeps the native traffic lights, so only dragging and the double-click
+//! zoom are granted meaningfully there, but the one capability file covers
+//! both platforms. Every file read, write, upload and delete goes through
 //! the home or Studio HTTP API, which run with full OS access, so the webview
 //! needs no filesystem, shell or process capability.
 
@@ -70,7 +74,9 @@ mod install_job;
 mod intake;
 mod locales;
 mod logfile;
+mod platform;
 mod prefs;
+mod proc;
 mod project;
 mod project_meta;
 mod recents;
@@ -95,8 +101,10 @@ use project::Project;
 use sidecar::StudioServer;
 
 /// The files that make up the bundled runtime. A directory holding all of them
-/// is the payload root, wherever the app is installed.
-const PAYLOAD: [&str; 3] = ["bun", "serve.mjs", "hyperframes/cli.js"];
+/// is the payload root, wherever the app is installed. The bun entry follows
+/// `platform::BUN_BIN` (`bun.exe` on Windows, `bun` elsewhere), matching what
+/// `stage-runtime.mjs` stages and `tauri.prod*.conf.json` bundles.
+const PAYLOAD: [&str; 3] = [platform::BUN_BIN, "serve.mjs", "hyperframes/cli.js"];
 
 /// Which backend the window is pointed at.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -235,11 +243,12 @@ fn open_project(
                     theme,
                     &language,
                     workspace.as_deref(),
+                    window_frame(),
                 )
             }
             Mode::Prod => {
                 let resource_root = resource_root(app)?;
-                let bun = resource_root.join("bun");
+                let bun = resource_root.join(platform::BUN_BIN);
                 let launcher = resource_root.join("serve.mjs");
                 let cli = resource_root.join("hyperframes").join("cli.js");
                 // Drop the previous server first: the new one must be able to
@@ -260,6 +269,7 @@ fn open_project(
                     theme,
                     &language,
                     workspace.as_deref(),
+                    window_frame(),
                 );
                 state.studio_origin = Some(started.origin());
                 state.studio = Some(started);
@@ -268,6 +278,9 @@ fn open_project(
         };
         state.home.record_open(&project.id, &project.dir);
         state.home.set_open_phase(OpenPhase::Idle);
+        if let Some(origin) = state.studio_origin.clone() {
+            state.home.set_studio_origin(Some(origin));
+        }
         url
     };
 
@@ -320,7 +333,9 @@ fn resource_root(app: &tauri::AppHandle) -> Result<PathBuf, CodedError> {
 
     for root in &candidates {
         if PAYLOAD.iter().all(|name| root.join(name).is_file()) {
-            return Ok(root.clone());
+            // Tauri hands Windows paths over as `\\?\C:\…`; the JS runtimes
+            // derive `import.meta.url`, `argv` and sibling paths from them.
+            return Ok(platform::from_verbatim(root));
         }
     }
     let looked_in = candidates
@@ -356,32 +371,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         Some("CmdOrCtrl+Shift+O"),
     )?;
-    let file = Submenu::with_items(
-        app,
-        i18n::t("menu.file.title"),
-        true,
-        &[
-            &open,
-            &home,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::close_window(app, Some(&i18n::t("menu.file.closeWindow")))?,
-            &PredefinedMenuItem::quit(app, Some(&i18n::t("menu.app.quit")))?,
-        ],
-    )?;
 
-    let about = PredefinedMenuItem::about(
-        app,
-        Some(&i18n::t("menu.app.about")),
-        Some(AboutMetadata {
-            name: Some("OpenVids".into()),
-            version: Some(env!("CARGO_PKG_VERSION").into()),
-            comments: Some(i18n::t("menu.app.aboutComment")),
-            website: Some("https://openvids.ai".into()),
-            website_label: Some("openvids.ai".into()),
-            credits: Some(i18n::t("menu.app.aboutCredits")),
-            ..Default::default()
-        }),
-    )?;
     // Next to About, as on macOS: the update itself runs in Rust (`updater`).
     let check_updates = MenuItem::with_id(
         app,
@@ -390,21 +380,6 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         None::<&str>,
     )?;
-    let app_menu = Submenu::with_items(
-        app,
-        i18n::t("menu.app.name"),
-        true,
-        &[
-            &about,
-            &check_updates,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, Some(&i18n::t("menu.app.hide")))?,
-            &PredefinedMenuItem::hide_others(app, Some(&i18n::t("menu.app.hideOthers")))?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, Some(&i18n::t("menu.app.quit")))?,
-        ],
-    )?;
-
     let edit = Submenu::with_items(
         app,
         i18n::t("menu.edit.title"),
@@ -460,16 +435,184 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         None::<&str>,
     )?;
-    let help = Submenu::with_id_and_items(
-        app,
-        "help",
-        i18n::t("menu.help.title"),
-        true,
-        &[&welcome, &report_problem],
-    )?;
 
-    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
+    #[cfg(target_os = "macos")]
+    {
+        let file = Submenu::with_items(
+            app,
+            i18n::t("menu.file.title"),
+            true,
+            &[
+                &open,
+                &home,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::close_window(app, Some(&i18n::t("menu.file.closeWindow")))?,
+                &PredefinedMenuItem::quit(app, Some(&i18n::t("menu.app.quit")))?,
+            ],
+        )?;
+        let about = PredefinedMenuItem::about(
+            app,
+            Some(&i18n::t("menu.app.about")),
+            Some(AboutMetadata {
+                name: Some("OpenVids".into()),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+                comments: Some(i18n::t("menu.app.aboutComment")),
+                website: Some("https://openvids.ai".into()),
+                website_label: Some("openvids.ai".into()),
+                credits: Some(i18n::t("menu.app.aboutCredits")),
+                ..Default::default()
+            }),
+        )?;
+        let help = Submenu::with_id_and_items(
+            app,
+            "help",
+            i18n::t("menu.help.title"),
+            true,
+            &[&welcome, &report_problem],
+        )?;
+        let app_menu = Submenu::with_items(
+            app,
+            i18n::t("menu.app.name"),
+            true,
+            &[
+                &about,
+                &check_updates,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, Some(&i18n::t("menu.app.hide")))?,
+                &PredefinedMenuItem::hide_others(app, Some(&i18n::t("menu.app.hideOthers")))?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, Some(&i18n::t("menu.app.quit")))?,
+            ],
+        )?;
+        Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
+    }
+    // Windows has no visible menu bar on the custom frame (the window is
+    // frameless and muda's Win32 bar would need a caption to sit in), so the
+    // native menu exists only for its Ctrl+ accelerators — which Tauri pumps
+    // through `TranslateAcceleratorW` even with no bar attached — and as the
+    // fallback surface under `OPENVIDS_SYSTEM_FRAME=1`. The OpenVids submenu
+    // (Hide / Hide Others) is macOS-only; About / Check updates / Quit move
+    // into File / Help the way Windows apps do. macOS keeps its menu above,
+    // byte-identical.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let settings = MenuItem::with_id(
+            app,
+            "open_settings",
+            i18n::t("menu.file.settings"),
+            true,
+            None::<&str>,
+        )?;
+        let file = Submenu::with_items(
+            app,
+            i18n::t("menu.file.title"),
+            true,
+            &[
+                &open,
+                &home,
+                &settings,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::close_window(app, Some(&i18n::t("menu.file.closeWindow")))?,
+                &PredefinedMenuItem::quit(app, Some(&i18n::t("menu.app.quit")))?,
+            ],
+        )?;
+        let file_help_about = PredefinedMenuItem::about(
+            app,
+            Some(&i18n::t("menu.app.about")),
+            Some(AboutMetadata {
+                name: Some("OpenVids".into()),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+                comments: Some(i18n::t("menu.app.aboutComment")),
+                website: Some("https://openvids.ai".into()),
+                website_label: Some("openvids.ai".into()),
+                credits: Some(i18n::t("menu.app.aboutCredits")),
+                ..Default::default()
+            }),
+        )?;
+        let help = Submenu::with_items(
+            app,
+            i18n::t("menu.help.title"),
+            true,
+            &[
+                &welcome,
+                &report_problem,
+                &check_updates,
+                &PredefinedMenuItem::separator(app)?,
+                &file_help_about,
+            ],
+        )?;
+        Menu::with_items(app, &[&file, &edit, &view, &window, &help])
+    }
 }
+
+/// One app-menu action, shared by the hidden native menu (its accelerators)
+/// and the title-bar app menu the pages draw on the Windows custom frame
+/// (which reaches Rust through `POST /api/menu/:action`). The pages can only
+/// ask for what the native menu already does, so the two cannot drift apart:
+/// every new action lands here once, never in two handlers.
+///
+/// The returned bool says whether the action ran (false only when the
+/// window is gone; unknown actions never reach here — the route 404s them).
+pub(crate) fn menu_action(app: &tauri::AppHandle, id: &str) -> bool {
+    match id {
+        "open_project" => {
+            // On the Projects page, ⌘O is the page's own Open Project…
+            // (its invalid-folder sheet and opening state); the menu
+            // accelerator consumes the key, so hand it over by script.
+            if window_is_on_home(app) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.eval("window.ovHome && window.ovHome.openProject()");
+                } else {
+                    return false;
+                }
+            } else {
+                pick_and_open(app);
+            }
+        }
+        "show_home" => show_home(app),
+        "open_settings" => {
+            // The in-page Ctrl+, chord is owned by the Projects page (see
+            // home.js); in Studio the dialog is native to the page. This
+            // menu item is the discoverable fallback for both.
+            if window_is_on_home(app) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.eval("window.ovHome && window.ovHome.openSettings()");
+                } else {
+                    return false;
+                }
+            }
+        }
+        "welcome" => show_onboarding(app),
+        "report_problem" => report::open_window("menu"),
+        "check_updates" => check_for_updates(app),
+        "reload" => {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = window.reload() {
+                    eprintln!("[openvids] could not reload the window: {error}");
+                }
+            } else {
+                return false;
+            }
+        }
+        "quit" => app.exit(0),
+        _ => return false,
+    }
+    true
+}
+
+/// The actions the title-bar app menu may ask for (`POST /api/menu/:action`,
+/// token-gated like every `/api/` route). About is page-side (the pages read
+/// `GET /api/menu/about` and render their own sheet), so it is not
+/// dispatched — listing it here would imply a Rust path that does not exist.
+pub(crate) const MENU_ACTIONS: [&str; 7] = [
+    "open_project",
+    "show_home",
+    "open_settings",
+    "reload",
+    "welcome",
+    "check_updates",
+    "quit",
+];
 
 /// Rebuild the native menu in the current language. macOS owns the menu bar
 /// app-wide, so `AppHandle::set_menu` (which hops to the main thread) is the
@@ -480,6 +623,20 @@ fn apply_language(app: &tauri::AppHandle) {
         Ok(menu) => {
             if let Err(error) = app.set_menu(menu) {
                 log_line(&format!("could not apply the menu language: {error}"));
+            }
+            // `set_menu` re-attaches the Win32 bar; on the custom frame it
+            // has no caption to sit in, so hide it again with `hide_menu`
+            // (see the setup block: `remove_menu` would evict the menu from
+            // the accelerator map and kill every native chord).
+            #[cfg(windows)]
+            {
+                if window_frame() == "custom" {
+                    if let Some(window) = app.get_webview_window("main") {
+                        if let Err(error) = window.hide_menu() {
+                            eprintln!("[openvids] could not hide the menu bar: {error}");
+                        }
+                    }
+                }
             }
         }
         Err(error) => log_line(&format!("could not rebuild the menu: {error}")),
@@ -494,37 +651,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(build_menu)
         .on_menu_event(|app, event| {
-            if event.id().as_ref() == "open_project" {
-                // On the Projects page, ⌘O is the page's own Open Project…
-                // (its invalid-folder sheet and opening state); the menu
-                // accelerator consumes the key, so hand it over by script.
-                if window_is_on_home(app) {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.eval("window.ovHome && window.ovHome.openProject()");
-                    }
-                } else {
-                    pick_and_open(app);
-                }
-            }
-            if event.id().as_ref() == "show_home" {
-                show_home(app);
-            }
-            if event.id().as_ref() == "welcome" {
-                show_onboarding(app);
-            }
-            if event.id().as_ref() == "report_problem" {
-                report::open_window("menu");
-            }
-            if event.id().as_ref() == "check_updates" {
-                check_for_updates(app);
-            }
-            if event.id().as_ref() == "reload" {
-                if let Some(window) = app.get_webview_window("main") {
-                    if let Err(error) = window.reload() {
-                        log_line(&format!("could not reload the window: {error}"));
-                    }
-                }
-            }
+            menu_action(app, event.id().as_ref());
         })
         .setup(|app| {
             let handle = app.handle().clone();
@@ -565,11 +692,11 @@ pub fn run() {
                         home_create::set_staged_templates(staged);
                     }
                     agent_proxy::set_production_launch(
-                        root.join("bun"),
+                        root.join(platform::BUN_BIN),
                         root.join("agent-runtime").join("main.ts"),
                     );
                     cli_runner::set_production_launch(
-                        root.join("bun"),
+                        root.join(platform::BUN_BIN),
                         root.join("serve.mjs"),
                         root.join("hyperframes").join("cli.js"),
                     );
@@ -707,7 +834,7 @@ pub fn run() {
                 .inner_size(1600.0, 1000.0)
                 .min_inner_size(1100.0, 700.0)
                 .theme(window_theme(&preferences));
-            // Overlay titlebar (contract 8): the traffic lights float over the
+            // Overlay titlebar (macOS): the traffic lights float over the
             // pages' own 52 px titlebar at its 20 px inset, vertically centred
             // (AppKit offsets the y inset by its own title-bar metrics: 28
             // puts the 12 px lights at y = 20, measured in the running window).
@@ -719,6 +846,83 @@ pub fn run() {
                     .title_bar_style(tauri::TitleBarStyle::Overlay)
                     .hidden_title(true)
                     .traffic_light_position(tauri::LogicalPosition::new(20.0, 28.0));
+            }
+            // Windows custom frame (`window_frame() == "custom"`): no system
+            // decorations, so the pages' own titlebars (Projects header,
+            // Studio header) are the caption, with minimize / maximize /
+            // close on the right. `decorations(false)` keeps WS_CAPTION,
+            // WS_MINIMIZEBOX, WS_MAXIMIZEBOX and WS_THICKFRAME on the HWND —
+            // tao only hides the non-client paint — so edge resizing, the
+            // native NCHITTEST border handler (`undecorated_resizing` in
+            // tauri-runtime-wry), Win+arrow / screen-edge snap, the taskbar
+            // minimize button and double-click-drag-region maximize all keep
+            // working; `min_inner_size` above still clamps WM_GETMINMAXINFO.
+            // `.shadow(true)` keeps the DWM drop shadow on the borderless
+            // window (white 1 px border + rounded corners on Windows 11).
+            // Snap Layouts (the hover-over-maximize flyout) belong to the
+            // system caption buttons, so the custom buttons cannot show it;
+            // Win+arrows and edge snap cover the same layouts, which the
+            // issue accepts as enough. `tauri-plugin-decorum` was evaluated
+            // and rejected: it injects its own caption overlay sized for a
+            // local `tauri://` page and assumes GlobalTauri IPC, neither of
+            // which holds for our loopback `http://127.0.0.1` pages with
+            // `withGlobalTauri: false`.
+            // `OPENVIDS_SYSTEM_FRAME=1` keeps `decorations(true)` as the
+            // escape hatch (remote desktop, odd DWM themes): the OS draws
+            // its own frame and the pages skip their buttons.
+            #[cfg(windows)]
+            {
+                // Windows cascades a new window from the top-left at the fixed
+                // 1600x1000: off-centre, and taller than the screen on a small
+                // or high-DPI monitor. Start geometry comes from the primary
+                // monitor's work area (the taskbar is already excluded) through
+                // `platform::start_window_size` (3:2 at most, 1:1 at least, fixed
+                // gaps), and the window is centred in that area. macOS places
+                // and sizes its windows itself, unchanged.
+                if let Ok(Some(monitor)) = handle.primary_monitor() {
+                    let scale = monitor.scale_factor();
+                    let area = monitor.work_area();
+                    let (area_x, area_y) = (
+                        f64::from(area.position.x) / scale,
+                        f64::from(area.position.y) / scale,
+                    );
+                    let (area_w, area_h) = (
+                        f64::from(area.size.width) / scale,
+                        f64::from(area.size.height) / scale,
+                    );
+                    let (width, height) = platform::start_window_size(area_w, area_h);
+                    window = window
+                        .inner_size(width, height)
+                        .min_inner_size(width.min(1100.0), height.min(700.0))
+                        .position(
+                            area_x + (area_w - width) / 2.0,
+                            area_y + (area_h - height) / 2.0,
+                        );
+                } else {
+                    window = window.center();
+                }
+                if window_frame() != "system" {
+                    window = window.decorations(false).shadow(true);
+                }
+            }
+            // Start-up flash (Windows): the window used to appear with the
+            // native menu bar and a white webview for a few frames before the
+            // Projects page painted. Start hidden (Windows only; macOS keeps
+            // its behaviour exactly), do the menu/backdrop work below while
+            // hidden, then reveal once the first page has loaded — with a
+            // 1.5 s guard timer so a failing load can never leave an
+            // invisible window. Both paths funnel through `show_main_window`,
+            // which also focuses the window and is a no-op once visible.
+            #[cfg(windows)]
+            {
+                window = window.visible(false);
+                let reveal_handle = handle.clone();
+                window = window.on_page_load(move |window, payload| {
+                    use tauri::webview::PageLoadEvent;
+                    if payload.event() == PageLoadEvent::Finished && window.label() == "main" {
+                        show_main_window(&reveal_handle);
+                    }
+                });
             }
             window
                 // Tauri otherwise swallows OS file drops and re-emits them as
@@ -763,6 +967,43 @@ pub fn run() {
                 })
                 .build()?;
             paint_window_background(&handle);
+            // Windows custom frame: the app menu stays attached (its Ctrl+
+            // accelerators pump through `TranslateAcceleratorW` off the
+            // process-wide menu map in Tauri's `msg_hook`, with no bar
+            // drawn) but the bar itself has no caption to sit in, so detach
+            // it from the HWND with `hide_menu` (`SetMenu(null)` + redraw).
+            // `hide_menu` — NOT `remove_menu`: removal also evicts the menu
+            // from the map the accelerator hook reads, which would silently
+            // kill every native menu chord. Hiding keeps the map, the
+            // subclass proc and the accelerator table, so all chords keep
+            // firing. Under `OPENVIDS_SYSTEM_FRAME=1` the bar stays: it is
+            // the fallback surface.
+            #[cfg(windows)]
+            {
+                if window_frame() == "custom" {
+                    if let Some(window) = handle.get_webview_window("main") {
+                        if let Err(error) = window.hide_menu() {
+                            eprintln!("[openvids] could not hide the menu bar: {error}");
+                        }
+                    }
+                }
+            }
+            // The guard half of the hidden-start above (Windows only): even if
+            // the first page never reports `Finished` (a failing load, a slow
+            // loopback bind), the window must become visible — `show` + focus
+            // after ~1.5 s, a no-op when the load event already revealed it.
+            // Also the `OPENVIDS_SYSTEM_FRAME=1` path: same builder, same flag.
+            #[cfg(windows)]
+            {
+                let guard_handle = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    let moved = guard_handle.clone();
+                    let _ = guard_handle.run_on_main_thread(move || {
+                        show_main_window(&moved);
+                    });
+                });
+            }
             // Anonymous usage statistics (`telemetry.rs`): off the setup path,
             // and never when the environment or a debug build says so.
             telemetry::start(&handle, dev);
@@ -891,6 +1132,91 @@ fn home_opener(app: tauri::AppHandle) -> home_routes::Opener {
     std::sync::Arc::new(move |dir, workspace| open_project_async(&app, dir, workspace))
 }
 
+/// Which titlebar chrome the pages draw: `overlay` (macOS traffic lights),
+/// `custom` (Windows frameless: the page draws minimize / maximize / close),
+/// `system` (Windows fallback behind `OPENVIDS_SYSTEM_FRAME=1`: the OS draws
+/// its own frame and the pages keep only their content, no caption buttons).
+///
+/// macOS is always `overlay`. On Windows the env var is the escape hatch for
+/// a broken custom frame (remote desktop, odd DWM themes): the window keeps
+/// `decorations(true)` there and the pages skip their buttons.
+pub(crate) fn window_frame() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "overlay"
+    }
+    #[cfg(windows)]
+    {
+        if std::env::var_os("OPENVIDS_SYSTEM_FRAME")
+            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true") || v == "yes")
+        {
+            "system"
+        } else {
+            "custom"
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        "overlay"
+    }
+}
+
+#[cfg(test)]
+mod window_frame_tests {
+    use super::window_frame;
+
+    // The serial lock: these tests mutate the process environment, so they
+    // must not run concurrently with each other.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_env(var: &str, value: Option<&str>, check: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior = std::env::var_os(var);
+        match value {
+            Some(v) => std::env::set_var(var, v),
+            None => std::env::remove_var(var),
+        }
+        check();
+        match prior {
+            Some(v) => std::env::set_var(var, v),
+            None => std::env::remove_var(var),
+        }
+    }
+
+    #[test]
+    fn system_frame_fallback_is_opt_in() {
+        with_env("OPENVIDS_SYSTEM_FRAME", None, || {
+            if cfg!(windows) {
+                assert_eq!(window_frame(), "custom");
+            } else {
+                assert_eq!(window_frame(), "overlay");
+            }
+        });
+        with_env("OPENVIDS_SYSTEM_FRAME", Some("1"), || {
+            if cfg!(windows) {
+                assert_eq!(window_frame(), "system");
+            } else {
+                assert_eq!(window_frame(), "overlay");
+            }
+        });
+        with_env("OPENVIDS_SYSTEM_FRAME", Some("true"), || {
+            if cfg!(windows) {
+                assert_eq!(window_frame(), "system");
+            } else {
+                assert_eq!(window_frame(), "overlay");
+            }
+        });
+        // An empty or unrelated value is not opt-in.
+        with_env("OPENVIDS_SYSTEM_FRAME", Some("0"), || {
+            if cfg!(windows) {
+                assert_eq!(window_frame(), "custom");
+            } else {
+                assert_eq!(window_frame(), "overlay");
+            }
+        });
+    }
+}
+
 /// The native window theme for the preferences: fixed for Dark / Light,
 /// following macOS for Match system. The report window (`report.rs`) uses it
 /// too, so every shell window follows the same preference.
@@ -927,6 +1253,21 @@ fn paint_window_background(app: &tauri::AppHandle) {
     };
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_background_color(Some(color));
+    }
+}
+
+/// Reveal the main window once, then give it focus. A no-op when the window
+/// is already visible, so the page-load event and the guard timer below can
+/// both call it without tracking who won. Windows only (the window starts
+/// hidden there); macOS never hides it.
+#[cfg(windows)]
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(true) {
+            return;
+        }
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 
@@ -1016,6 +1357,13 @@ fn app_handle_for_home_cleanup() -> Option<tauri::AppHandle> {
         .and_then(|guard| guard.clone())
 }
 
+/// The handle `POST /api/menu/:action` dispatches through: the same handle
+/// the `on_navigation` cleanup stashes in `setup`, reused so the route and
+/// the native menu share one `menu_action` entry point.
+pub(crate) fn menu_app() -> Option<tauri::AppHandle> {
+    app_handle_for_home_cleanup()
+}
+
 /// `scheme://host:port` without path, query or fragment, so `/`, `/index.html`
 /// and query-carrying landings on the same server all compare equal.
 fn normalize_origin(url: &tauri::Url) -> String {
@@ -1040,6 +1388,7 @@ fn take_closed_studio(app: &tauri::AppHandle) -> Option<StudioServer> {
     state.project = None;
     state.studio_origin = None;
     state.home.clear_current();
+    state.home.set_studio_origin(None);
     state.studio.take()
 }
 
@@ -1091,12 +1440,34 @@ mod back_navigation_tests {
         let home = "http://127.0.0.1:57035";
         let studio_origin = "http://127.0.0.1:5210";
         assert_eq!(
-            sidecar::studio_url(studio_origin, "my video", home, "dark", "system", None),
+            sidecar::studio_url(studio_origin, "my video", home, "dark", "system", None, "overlay"),
             "http://127.0.0.1:5210/?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsTheme=dark&openvidsLanguage=system#project/my%20video"
         );
         assert_eq!(
-            sidecar::studio_url(studio_origin, "v", home, "light", "ru", Some("media")),
+            sidecar::studio_url(studio_origin, "v", home, "light", "ru", Some("media"), "overlay"),
             "http://127.0.0.1:5210/?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsTheme=light&openvidsLanguage=ru&openvidsWorkspace=media#project/v"
+        );
+    }
+
+    #[test]
+    fn studio_url_appends_the_frame_hint_for_non_overlay_frames() {
+        let home = "http://127.0.0.1:57035";
+        let studio_origin = "http://127.0.0.1:5210";
+        // macOS overlay: no parameter, links stay as they were.
+        assert!(
+            !sidecar::studio_url(studio_origin, "v", home, "dark", "system", None, "overlay")
+                .contains("openvidsFrame")
+        );
+        // Windows custom frame: the Studio header draws caption buttons.
+        assert_eq!(
+            sidecar::studio_url(studio_origin, "v", home, "dark", "system", None, "custom"),
+            "http://127.0.0.1:5210/?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsTheme=dark&openvidsLanguage=system&openvidsFrame=custom#project/v"
+        );
+        // Windows system-frame fallback: explicit too, so the pages skip
+        // their buttons. The workspace still sorts before the frame hint.
+        assert_eq!(
+            sidecar::studio_url(studio_origin, "v", home, "dark", "system", Some("media"), "system"),
+            "http://127.0.0.1:5210/?openvidsHome=http%3A%2F%2F127.0.0.1%3A57035&openvidsTheme=dark&openvidsLanguage=system&openvidsWorkspace=media&openvidsFrame=system#project/v"
         );
     }
 
@@ -1121,6 +1492,25 @@ mod back_navigation_tests {
         assert_eq!(
             sidecar::urlencode("http://127.0.0.1:57035"),
             "http%3A%2F%2F127.0.0.1%3A57035"
+        );
+    }
+
+    #[test]
+    fn menu_actions_are_exactly_what_the_pages_may_ask_for() {
+        // The route 404s anything outside this table, and the native menu
+        // only carries these ids: adding an action means adding it here, in
+        // `menu_action`, and in both pages' menus — never just one handler.
+        assert_eq!(
+            MENU_ACTIONS,
+            [
+                "open_project",
+                "show_home",
+                "open_settings",
+                "reload",
+                "welcome",
+                "check_updates",
+                "quit",
+            ]
         );
     }
 }

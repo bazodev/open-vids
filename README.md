@@ -2,7 +2,7 @@
 
 **Website: [openvids.ai](https://openvids.ai)**
 
-OpenVids is an open-source desktop video editor for macOS that you work in together with AI agents. You describe the video in chat; the agents cut footage, build the timeline, add captions and motion graphics, then render the result and check it. Everything runs on your machine, and the project is a folder of plain files you can open and edit by hand.
+OpenVids is an open-source desktop video editor for macOS and Windows that you work in together with AI agents. You describe the video in chat; the agents cut footage, build the timeline, add captions and motion graphics, then render the result and check it. Everything runs on your machine, and the project is a folder of plain files you can open and edit by hand.
 
 It began as a snapshot of [HyperFrames](https://github.com/heygen-com/hyperframes) (HeyGen, Apache-2.0) and is developed here as its own app, with no npm distribution and no cloud backend.
 
@@ -20,18 +20,26 @@ It began as a snapshot of [HyperFrames](https://github.com/heygen-com/hyperframe
 
 OpenVids is at an early stage.
 
-- macOS 11 or later on Apple Silicon. There is no Intel build.
-- Prebuilt downloads are on [GitHub Releases](https://github.com/bazodev/open-vids/releases/latest); you can also build from source.
-- The app checks GitHub Releases for updates and installs them on a button press; updates are verified with the project's updater signing key, not by Apple code signing.
-- Builds are ad-hoc signed and not notarized, so macOS blocks the first launch (see [Install](#install)).
-- Rendering and thumbnails need Chrome and FFmpeg installed on the machine; OpenVids does not ship them.
+- macOS 11 or later on Apple Silicon (no Intel build); Windows 10 or later on x64.
+- Prebuilt downloads are on [GitHub Releases](https://github.com/bazodev/open-vids/releases/latest): a `.dmg` for macOS and an NSIS `*-setup.exe` for Windows; you can also build from source.
+- The app checks GitHub Releases for updates and installs them on a button press; updates are verified with the project's updater signing key, not by OS code signing.
+- macOS builds are ad-hoc signed and not notarized, so macOS blocks the first launch (see [Install](#install)). Windows builds are unsigned, so SmartScreen warns about an unknown publisher at install/first launch.
+- Rendering and thumbnails need Chrome and FFmpeg installed on the machine; OpenVids does not ship them. On Windows the app offers a download button that fetches the official gyan.dev FFmpeg essentials build (SHA-256 verified) into `%USERPROFILE%\.openvids\ffmpeg`; an FFmpeg already on `PATH` (or pointed at by `HYPERFRAMES_FFMPEG_PATH` / `HYPERFRAMES_FFPROBE_PATH`) is used first.
 - The local Studio server is unauthenticated on loopback while a project is open. See [SECURITY.md](SECURITY.md).
 
 ## Install
 
+### macOS
+
 1. Download `OpenVids_<version>_aarch64.dmg` from the [latest release](https://github.com/bazodev/open-vids/releases/latest), open it and drag OpenVids to Applications.
 2. Open OpenVids once. macOS says it cannot verify the developer: the app is not notarized. Open **System Settings → Privacy & Security**, scroll to Security and click **Open Anyway** next to OpenVids, then confirm. Alternatively, in Terminal: `xattr -dr com.apple.quarantine /Applications/OpenVids.app`.
 3. Install [Google Chrome](https://www.google.com/chrome/) and FFmpeg (`brew install ffmpeg`, or the button OpenVids shows when FFmpeg is missing).
+
+### Windows
+
+1. Download `OpenVids_<version>_x64-setup.exe` from the [latest release](https://github.com/bazodev/open-vids/releases/latest) and run it (per-user install under `%LOCALAPPDATA%`). The installer bootstraps WebView2 if needed.
+2. Windows SmartScreen warns about an unknown publisher because the build is not code-signed: click **More info → Run anyway**.
+3. Install [Google Chrome](https://www.google.com/chrome/). For FFmpeg, either put `ffmpeg`/`ffprobe` on `PATH` or use the download button OpenVids shows when FFmpeg is missing (official gyan.dev essentials build with SHA-256 check, into `%USERPROFILE%\.openvids\ffmpeg`).
 
 Later versions install from inside the app (the update button), without these steps.
 
@@ -46,7 +54,9 @@ bun install
 bun run desktop:dev      # run the app in development mode
 ```
 
-To build the application bundle (`OpenVids.app` and a `.dmg`):
+On Windows this needs the MSVC Build Tools (C++ workload), Rust stable, Bun, and a WebView2 runtime; see [CONTRIBUTING.md](CONTRIBUTING.md) and `apps/desktop/README.md`.
+
+To build the application bundle (macOS: `OpenVids.app` and a `.dmg`; Windows: the NSIS `*-setup.exe`):
 
 ```bash
 bun run desktop:build
@@ -79,7 +89,7 @@ OpenVids.app
                  └─ composition iframe, same-origin with the editor
 ```
 
-The window loads Studio from the sidecar; the composition iframe stays same-origin with the editor so it can reach `contentDocument` directly. The sidecar is per-project and is reaped on quit (SIGTERM grace, then SIGKILL of the process group).
+The window loads Studio from the sidecar; the composition iframe stays same-origin with the editor so it can reach `contentDocument` directly. The sidecar is per-project and is reaped on quit (on macOS/Linux: SIGTERM grace, then SIGKILL of the process group; on Windows: the whole tree is supervised by a kill-on-close Job Object in `apps/desktop/src-tauri/src/proc.rs`, so quitting — or killing the app from Task Manager — reaps bun, Chrome and FFmpeg).
 
 ## Agent
 
@@ -113,9 +123,9 @@ Help › **Report a Problem…** opens a window that does not block the editor: 
 ## Requirements
 
 - [Bun](https://bun.sh) (package manager and the sidecar JS runtime)
-- Rust stable toolchain (Tauri builds; `desktop:check` runs `cargo check`)
-- Node.js 22+, FFmpeg + ffprobe on PATH, and a Chrome the CLI can drive (`npx hyperframes doctor` reports all of these; see `packages/cli/src/commands/doctor.ts` and `packages/cli/src/browser/preflight.ts`)
-- Long-form analysis: `whisper-cli` (e.g. `brew install whisper-cpp`; the CLI installs it when possible) and its model are fetched on first use; the diarization runtime and models download into `~/.cache/hyperframes/` on first use
+- Rust stable toolchain (Tauri builds; `desktop:check` runs `cargo check`). On Windows: the MSVC Build Tools (C++ workload) plus a WebView2 runtime (the installer bootstraps it).
+- Node.js 22+, FFmpeg + ffprobe on PATH, and a Chrome the CLI can drive (`npx hyperframes doctor` reports all of these; see `packages/cli/src/commands/doctor.ts` and `packages/cli/src/browser/preflight.ts`). On Windows FFmpeg may instead come from the app's download button (`%USERPROFILE%\.openvids\ffmpeg`).
+- Long-form analysis: `whisper-cli` (`brew install whisper-cpp` on macOS; the CLI installs it when possible) and its model are fetched on first use; the diarization runtime and models download into `~/.cache/hyperframes/` on first use
 
 ## Commands
 
@@ -124,7 +134,7 @@ bun install              # install workspace dependencies
 bun run build            # build all packages (CLI bundle embeds the Studio SPA)
 bun run desktop:dev      # Tauri dev window (Studio via Vite, no sidecar)
 bun run desktop:stage    # assemble apps/desktop/runtime (gitignored)
-bun run desktop:build    # build + stage + tauri build (.app + .dmg)
+bun run desktop:build    # build + stage + tauri build (.app + .dmg on macOS, NSIS setup on Windows)
 bun run desktop:check    # cargo check for the Tauri shell
 bun run lint             # workspace checks + oxlint + skills lint
 bun run typecheck        # typecheck every workspace

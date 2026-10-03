@@ -49,7 +49,9 @@ describe("opening a film of external scenes", () => {
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    expect(changed).toEqual([]);
+    // The preview store creates `.hyperframes/preview/` on first open; that
+    // directory event is infrastructure, not an outside edit of the project.
+    expect(changed.every((path) => path === ".hyperframes")).toBe(true);
     const stamped = fs.readFileSync(path.join(dir, "compositions", "s23.html"), "utf-8");
     expect(stamped).toContain("data-hf-id=");
   });

@@ -12,9 +12,10 @@
 //! - `OPENVIDS_CLI_BUN` / `OPENVIDS_CLI_ENTRY` override both (tests point them
 //!   at a shell script).
 //!
-//! Every child gets its own process group; `kill_group` signals the whole group
-//! (SIGTERM, a grace period, SIGKILL) and always reaps the leader, so a
-//! cancelled or timed-out run leaves neither a zombie nor an orphaned Chrome.
+//! Every child gets its own supervision scope (process group on unix, Job
+//! Object on Windows — see `crate::proc`); `kill_group` stops the whole tree
+//! and always reaps the leader, so a cancelled or timed-out run leaves
+//! neither a zombie nor an orphaned Chrome.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -32,6 +33,10 @@ pub const TERM_GRACE: Duration = Duration::from_secs(3);
 #[derive(Debug, Clone)]
 pub struct CliLaunch {
     pub bun: PathBuf,
+    /// Extra argv between the runtime and the launcher/entry. Test-only:
+    /// `cmd /C <entry.cmd>` needs its `/C` back after the entry on Windows.
+    /// Production never sets `OPENVIDS_CLI_BUN_ARGS`, so this stays empty.
+    pub bun_args: Vec<String>,
     /// `serve.mjs`, when there is one: it ties the child's life to ours.
     pub launcher: Option<PathBuf>,
     pub entry: PathBuf,
@@ -44,6 +49,7 @@ pub fn set_production_launch(bun: PathBuf, launcher: PathBuf, entry: PathBuf) {
     if let Ok(mut slot) = PROD_LAUNCH.lock() {
         *slot = Some(CliLaunch {
             bun,
+            bun_args: Vec::new(),
             launcher: Some(launcher),
             entry,
         });
@@ -53,10 +59,15 @@ pub fn set_production_launch(bun: PathBuf, launcher: PathBuf, entry: PathBuf) {
 /// Env overrides, else the staged production CLI, else the workspace (dev).
 pub fn launch() -> Option<CliLaunch> {
     let bun_override = std::env::var_os("OPENVIDS_CLI_BUN").map(PathBuf::from);
+    // Test-only (see `CliLaunch::bun_args`): split on whitespace, no quoting.
+    let bun_args: Vec<String> = std::env::var("OPENVIDS_CLI_BUN_ARGS")
+        .map(|args| args.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
     if let Some(entry) = std::env::var_os("OPENVIDS_CLI_ENTRY").map(PathBuf::from) {
         if entry.is_absolute() && entry.is_file() {
             return Some(CliLaunch {
-                bun: bun_override.unwrap_or_else(|| PathBuf::from("bun")),
+                bun: bun_override.unwrap_or_else(|| PathBuf::from(crate::platform::BUN_BIN)),
+                bun_args,
                 launcher: None,
                 entry,
             });
@@ -66,6 +77,7 @@ pub fn launch() -> Option<CliLaunch> {
         if prod.entry.is_file() {
             return Some(CliLaunch {
                 bun: bun_override.unwrap_or(prod.bun),
+                bun_args,
                 ..prod
             });
         }
@@ -81,7 +93,8 @@ pub fn launch() -> Option<CliLaunch> {
         .join("serve.mjs");
     if entry.is_file() {
         return Some(CliLaunch {
-            bun: bun_override.unwrap_or_else(|| PathBuf::from("bun")),
+            bun: bun_override.unwrap_or_else(|| PathBuf::from(crate::platform::BUN_BIN)),
+            bun_args: Vec::new(),
             launcher: launcher.is_file().then_some(launcher),
             entry,
         });
@@ -90,12 +103,13 @@ pub fn launch() -> Option<CliLaunch> {
 }
 
 /// The command for `hyperframes <args>`, not yet spawned: stdout piped, stdin
-/// closed, own process group.
+/// closed, own supervision scope (see `crate::proc`).
 pub fn command(args: &[&str]) -> Result<Command, CodedError> {
     let launch = launch().ok_or_else(|| {
         CodedError::plain("cli_not_installed", "the OpenVids command-line tools are not installed")
     })?;
     let mut command = Command::new(&launch.bun);
+    command.args(&launch.bun_args);
     if let Some(launcher) = &launch.launcher {
         command.arg(launcher);
     }
@@ -106,66 +120,31 @@ pub fn command(args: &[&str]) -> Result<Command, CodedError> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+    for (key, value) in super::ffmpeg_install::managed_env() {
+        command.env(key, value);
     }
+    crate::proc::configure(&mut command);
     Ok(command)
 }
 
-/// Signal the child's whole process group, give it `TERM_GRACE`, then SIGKILL
-/// the group, and reap the leader. Blocks up to the grace period.
+/// Signal the child's whole tree, give it `TERM_GRACE`, then SIGKILL
+/// the tree, and reap the leader. Blocks up to the grace period.
 pub fn kill_group(child: &mut Child) {
-    #[cfg(unix)]
-    {
-        let pid = child.id() as libc::pid_t;
-        if pid > 0 {
-            unsafe { libc::killpg(pid, libc::SIGTERM) };
-            let deadline = Instant::now() + TERM_GRACE;
-            while Instant::now() < deadline {
-                if matches!(child.try_wait(), Ok(Some(_))) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            // Unconditional: the group can outlive its leader. On a dead group
-            // this is ESRCH.
-            unsafe { libc::killpg(pid, libc::SIGKILL) };
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+    crate::proc::terminate(child, TERM_GRACE);
 }
 
-/// Send SIGTERM to a child's group without waiting (the caller escalates).
+/// Ask a child's tree to stop without waiting (the caller escalates).
 pub fn terminate_group(pid: u32) {
-    #[cfg(unix)]
-    {
-        let pid = pid as libc::pid_t;
-        if pid > 0 {
-            unsafe { libc::killpg(pid, libc::SIGTERM) };
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = pid;
+    crate::proc::terminate_group(pid);
 }
 
-/// SIGKILL a child's group.
+/// Forcibly stop a child's whole tree.
 pub fn kill_group_now(pid: u32) {
-    #[cfg(unix)]
-    {
-        let pid = pid as libc::pid_t;
-        if pid > 0 {
-            unsafe { libc::killpg(pid, libc::SIGKILL) };
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = pid;
+    crate::proc::kill_group_now(pid);
 }
 
 /// Run `hyperframes <args>` to completion and return its stdout. A run that
-/// takes longer than `timeout` is killed (group included) and fails.
+/// takes longer than `timeout` is killed (tree included) and fails.
 pub fn run(args: &[&str], timeout: Duration) -> Result<String, CodedError> {
     let mut child = command(args)?.spawn().map_err(|e| {
         CodedError::new(
@@ -174,6 +153,7 @@ pub fn run(args: &[&str], timeout: Duration) -> Result<String, CodedError> {
             json!({ "detail": e.to_string() }),
         )
     })?;
+    crate::proc::track(&child);
     let mut stdout = child
         .stdout
         .take()
@@ -190,7 +170,13 @@ pub fn run(args: &[&str], timeout: Duration) -> Result<String, CodedError> {
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
                 kill_group(&mut child);
-                let _ = reader.join();
+                // The pipe's read end lives on the reader thread: joining it
+                // waits for every inheritor of stdout to exit. `kill_group`
+                // reaps the leader but a straggler outside the job (or a
+                // wedged pipe) must not hold this thread past the grace
+                // period — the 10 s test bound measures exactly this.
+                // Detach: the reader owns `stdout` now and dies with it;
+                // `run` returns without waiting for the pipe to drain.
                 return Err(CodedError::plain("check_timeout", "the check took too long"));
             }
             Err(e) => {
@@ -231,9 +217,15 @@ pub fn last_json_line(output: &str) -> Option<serde_json::Value> {
 pub mod tests {
     use super::*;
 
-    /// A fake CLI entry: `sh <script> <args…>`. Env vars are process-wide, so
-    /// tests that use it hold this lock.
+    /// A fake CLI entry: a script run by `bun` (same launcher the real CLI
+    /// uses in dev). Batch/`.cmd` cannot express what the tests need —
+    /// JSON with braces/quotes, background children, pid reporting, argv
+    /// branching — and `wmic` (pid lookup) is gone from Win11, while `bun`
+    /// is always on PATH in this repo's dev/test environment. Env vars are
+    /// process-wide, so tests that use it hold this lock.
     pub static FAKE_CLI_LOCK: Mutex<()> = Mutex::new(());
+
+    const FAKE_ENTRY_SUFFIX: &str = "cli.mjs";
 
     pub fn with_fake_cli<T>(script: &str, body: impl FnOnce() -> T) -> T {
         let _guard = FAKE_CLI_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -246,16 +238,61 @@ pub mod tests {
                 .unwrap_or(0)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let entry = dir.join("cli.sh");
+        let entry = dir.join(FAKE_ENTRY_SUFFIX);
         std::fs::write(&entry, script).unwrap();
-        std::env::set_var("OPENVIDS_CLI_BUN", "/bin/sh");
+        // Copy the runtime next to the script: the child then runs from a
+        // path no build step ever locks or replaces (the cargo `target/`
+        // copy is overwritten by `stage-runtime`, and an in-use `bun.exe`
+        // there blocks linking with `os error 32`).
+        let bun_src = find_bun_for_tests();
+        let bun_copy = dir.join(crate::platform::BUN_BIN);
+        let bun_ok = std::fs::copy(&bun_src, &bun_copy).is_ok();
+        let bun_cmd = if bun_ok { bun_copy } else { bun_src };
+        std::env::set_var("OPENVIDS_CLI_BUN", &bun_cmd);
         std::env::set_var("OPENVIDS_CLI_ENTRY", &entry);
         let out = body();
         std::env::remove_var("OPENVIDS_CLI_BUN");
+        std::env::remove_var("OPENVIDS_CLI_BUN_ARGS");
         std::env::remove_var("OPENVIDS_CLI_ENTRY");
         let _ = std::fs::remove_dir_all(&dir);
         out
     }
+
+    /// `BUN_BIN` is a bare file name in dev: search PATH the way the OS
+    /// would, so the fake CLI never depends on the runner's cwd.
+    /// `OPENVIDS_TEST_BUN` overrides the search (power users, packaging).
+    /// `pub(crate)` for the `proc` tree tests, which copy the runtime for
+    /// the same reason `with_fake_cli` does.
+    pub(crate) fn find_bun_for_tests() -> std::path::PathBuf {
+        if let Some(path) = std::env::var_os("OPENVIDS_TEST_BUN") {
+            return std::path::PathBuf::from(path);
+        }
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(crate::platform::BUN_BIN);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        std::path::PathBuf::from(crate::platform::BUN_BIN)
+    }
+
+    /// `echo {"args":"$*"}` in the shell at hand.
+    const ECHO_ARGS_SCRIPT: &str =
+        "console.log(JSON.stringify({args: process.argv.slice(2).join(' ')}));";
+
+    /// `exit 3` in the shell at hand.
+    const EXIT_3_SCRIPT: &str = "process.exit(3);";
+
+    /// A script that outlives `timeout` while holding a same-tree child.
+    /// The child is a real grandchild process (not a thread): on unix two
+    /// `sleep`s, on Windows a `ping` sleeper — both must die with the tree.
+    #[cfg(unix)]
+    const HANG_WITH_CHILD_SCRIPT: &str =
+        "import { spawn } from 'node:child_process';\nspawn('sleep', ['30'], { stdio: 'ignore' });\nspawn('sleep', ['30'], { stdio: 'ignore' });\nawait new Promise(() => {});\n";
+    #[cfg(windows)]
+    const HANG_WITH_CHILD_SCRIPT: &str =
+        "import { spawn } from 'node:child_process';\nspawn('ping', ['-n', '30', '127.0.0.1'], { stdio: 'ignore' });\nawait new Promise(() => {});\n";
 
     #[test]
     fn json_is_taken_from_the_last_object_line() {
@@ -266,7 +303,7 @@ pub mod tests {
 
     #[test]
     fn a_run_returns_stdout_and_passes_its_arguments() {
-        let out = with_fake_cli("echo \"{\\\"args\\\":\\\"$*\\\"}\"", || {
+        let out = with_fake_cli(ECHO_ARGS_SCRIPT, || {
             run(&["doctor", "--tools"], Duration::from_secs(5))
         })
         .unwrap();
@@ -275,16 +312,16 @@ pub mod tests {
 
     #[test]
     fn a_failing_run_is_an_error() {
-        let err = with_fake_cli("exit 3", || run(&["x"], Duration::from_secs(5))).unwrap_err();
+        let err = with_fake_cli(EXIT_3_SCRIPT, || run(&["x"], Duration::from_secs(5))).unwrap_err();
         assert!(err.message.contains("failed"), "{err}");
         assert_eq!(err.code, Some("check_failed"));
     }
 
     #[test]
     fn a_run_past_its_timeout_is_killed_with_its_children() {
-        let started = Instant::now();
-        // The shell spawns a child sleeper in the same group; both must go.
-        let err = with_fake_cli("sleep 30 &\nsleep 30\n", || {
+        let started = std::time::Instant::now();
+        // The script spawns a child sleeper in the same tree; both must go.
+        let err = with_fake_cli(HANG_WITH_CHILD_SCRIPT, || {
             run(&["x"], Duration::from_millis(300))
         })
         .unwrap_err();

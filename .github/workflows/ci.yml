@@ -19,10 +19,25 @@ env:
 
 jobs:
   checks:
-    name: Checks
-    runs-on: macos-latest
+    name: Checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     steps:
+      # .gitattributes already pins `* text=auto eol=lf`, and oxfmt --check
+      # needs LF sources; keep autocrlf off so a Windows checkout cannot
+      # reintroduce CRLF.
+      - name: Enforce LF line endings
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -70,8 +85,8 @@ jobs:
         run: bun run --cwd apps/desktop test
 
   test:
-    name: Test (${{ matrix.name }})
-    runs-on: macos-latest
+    name: Test (${{ matrix.name }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -79,17 +94,31 @@ jobs:
         include:
           - name: studio
             packages: studio
+            os: macos-latest
           - name: render
             packages: core engine producer cli
+            os: macos-latest
           - name: services
             packages: agent-protocol agent-runtime studio-server parsers lint sdk shader-transitions player
             skills: true
+            os: macos-latest
+          # Windows smoke: studio unit tests against the full-codec FFmpeg below.
+          - name: windows
+            packages: studio
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Enforce LF line endings
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v5
 
       # The engine's HDR PNG tests read one LFS fixture; the rest of LFS is the producer's regression corpus.
       - name: Fetch test fixtures from LFS
+        if: runner.os == 'macOS'
         run: git lfs pull --include="packages/producer/tests/hdr-regression/src/hdr-photo-pq.png"
 
       - name: Setup Bun
@@ -103,10 +132,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       # Tests synthesize fixtures with libvorbis, libaom-av1, libvpx and x264; Homebrew's `ffmpeg` lacks some of them.
-      - name: Install FFmpeg
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
         run: |
           brew install ffmpeg-full
           echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
+
+      # gyan.dev full builds carry libx264/libx265/libvpx/libaom/libvorbis,
+      # matching the ffmpeg-full codec set the tests synthesize fixtures with.
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          curl -sSL -o "$RUNNER_TEMP/ffmpeg.7z" "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z"
+          7z x "$RUNNER_TEMP/ffmpeg.7z" -o"$RUNNER_TEMP/ffmpeg" -y > /dev/null
+          bindir="$(echo "$RUNNER_TEMP"/ffmpeg/ffmpeg-*-full_build/bin)"
+          test -x "$bindir/ffmpeg.exe"
+          "$bindir/ffmpeg.exe" -hide_banner -encoders | grep -E "libx264|libvpx|libvorbis" > /dev/null
+          echo "$bindir" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

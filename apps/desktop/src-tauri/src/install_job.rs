@@ -9,9 +9,9 @@
 //!   Starting while a job runs just returns the running job.
 //! - `state` returns the slot. A finished job (`done`, `failed`, `cancelled`)
 //!   stays there until the next `start`.
-//! - `cancel` SIGTERMs the child's process group, answers `cancelled` at once and
-//!   SIGKILLs the group after the grace period if it is still alive.
-//! - `shutdown` (app exit) does the same and waits for the group to go.
+//! - `cancel` asks the child's tree to stop, answers `cancelled` at once and
+//!   forcibly stops the tree after the grace period if it is still alive.
+//! - `shutdown` (app exit) does the same and waits for the tree to go.
 //! - A watchdog fails and kills a job that outlives the installer's timeout.
 //!
 //! Neither the slot's mutex nor the home server's state mutex is held across
@@ -121,7 +121,9 @@ pub enum ExitAction {
 
 pub trait Installer: Sync {
     /// The command to run, stdout piped. `attempt` is 0 for the first run.
-    /// It must give the child its own process group (see `cli_runner::command`).
+    /// It must go through `cli_runner::command` (or at least
+    /// `crate::proc::configure`); `InstallJob::spawn` applies the supervision
+    /// flags again, so both paths land in the child's tree.
     fn command(&self, attempt: u32) -> Result<Command, CodedError>;
     /// The state a freshly started job begins in.
     fn started(&self) -> InstallState;
@@ -145,13 +147,13 @@ pub trait Installer: Sync {
 
 const TAIL_LINES: usize = 12;
 
-struct Slot {
-    state: InstallState,
+pub(crate) struct Slot {
+    pub(crate) state: InstallState,
     /// Bumped by every `start`, so a finished supervisor never writes over a newer job.
-    generation: u64,
+    pub(crate) generation: u64,
     /// The process group leader while it is alive and not yet reaped.
-    pid: Option<u32>,
-    tail: Vec<String>,
+    pub(crate) pid: Option<u32>,
+    pub(crate) tail: Vec<String>,
 }
 
 pub struct InstallJob {
@@ -174,8 +176,15 @@ impl InstallJob {
         }
     }
 
-    fn slot(&self) -> MutexGuard<'_, Slot> {
+    pub(crate) fn slot(&self) -> MutexGuard<'_, Slot> {
         self.slot.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Run `f` with the slot locked. For in-process installers (the Windows
+    /// FFmpeg download has no child to supervise) that must mutate the slot
+    /// directly; process installers keep using `start`/`cancel`/`shutdown`.
+    pub(crate) fn with_slot<R>(&self, f: impl FnOnce(&mut Slot) -> R) -> R {
+        f(&mut self.slot())
     }
 
     pub fn state(&self) -> InstallState {
@@ -209,13 +218,18 @@ impl InstallJob {
     fn spawn(&self, attempt: u32) -> Result<std::process::Child, CodedError> {
         let mut command = self.installer.command(attempt)?;
         command.stdin(Stdio::null()).stdout(Stdio::piped());
-        command.spawn().map_err(|e| {
+        // Belt and suspenders with `Installer::command`: the flags are
+        // idempotent, so a forgotten call site still lands supervised.
+        crate::proc::configure(&mut command);
+        let child = command.spawn().map_err(|e| {
             CodedError::new(
                 "installer_start_failed",
                 format!("could not start the installer: {e}"),
                 json!({ "detail": e.to_string() }),
             )
-        })
+        })?;
+        crate::proc::track(&child);
+        Ok(child)
     }
 
     fn feed(&self, generation: u64, stream: Stream, line: &str) {
@@ -241,6 +255,10 @@ impl InstallJob {
                     }
                 })
             });
+            // Blocking read: returns when the leader exits AND every stdout
+            // inheritor is gone (the tree kill in `stop_group`/watchdog plus
+            // this process's own `kill_group_now` below guarantee that — the
+            // cancel path cannot return while a grandchild holds the pipe).
             if let Some(stdout) = child.stdout.take() {
                 for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                     self.feed(generation, Stream::Stdout, &line);
@@ -345,7 +363,7 @@ impl InstallJob {
         self.stop_group(pid, generation);
     }
 
-    /// SIGTERM now, SIGKILL after the grace period unless the supervisor reaped it first.
+    /// Ask the tree to stop now, forcibly stop it after the grace period unless the supervisor reaped it first.
     fn stop_group(&'static self, pid: Option<u32>, generation: u64) {
         let Some(pid) = pid else { return };
         cli_runner::terminate_group(pid);
@@ -438,15 +456,7 @@ pub mod test_support {
     }
 
     pub fn process_alive(pid: u32) -> bool {
-        #[cfg(unix)]
-        {
-            unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = pid;
-            false
-        }
+        crate::proc::is_alive(pid)
     }
 
     pub fn wait_until_gone(pid: u32) {

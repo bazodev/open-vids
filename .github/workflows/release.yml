@@ -1,6 +1,6 @@
 name: Release
 
-# Build and sign the macOS release for a version tag and create a DRAFT GitHub Release.
+# Build and sign the macOS and Windows releases for a version tag and create a DRAFT GitHub Release.
 #
 # The in-app updater points at https://github.com/bazodev/open-vids/releases/latest/download/latest.json.
 # That URL only resolves once the release is *published*: GitHub's "latest" is the most recent release
@@ -19,9 +19,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Release ${{ github.ref_name }}
+  build-macos:
+    name: Build macOS ${{ github.ref_name }}
     runs-on: macos-14
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,7 +75,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           OPENVIDS_RELEASE: "1"
 
-      - name: Collect artifacts and write latest.json
+      - name: Collect macOS artifacts
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -88,11 +91,144 @@ jobs:
             fi
           done
 
-          stage="release-assets"
-          mkdir -p "$stage"
-          cp "$dmg" "$stage/OpenVids_${version}_aarch64.dmg"
-          cp "$app_tar" "$stage/OpenVids_${version}_aarch64.app.tar.gz"
-          cp "$app_sig" "$stage/OpenVids_${version}_aarch64.app.tar.gz.sig"
+          mkdir -p release-assets
+          cp "$dmg" "release-assets/OpenVids_${version}_aarch64.dmg"
+          cp "$app_tar" "release-assets/OpenVids_${version}_aarch64.app.tar.gz"
+          cp "$app_sig" "release-assets/OpenVids_${version}_aarch64.app.tar.gz.sig"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: release-assets/
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows ${{ github.ref_name }}
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Enforce LF line endings
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Same as macOS: the release build never reads LFS fixtures.
+          lfs: false
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1"
+
+      - name: Fetch the tag
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/desktop/src-tauri -> target"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify the tag matches the app version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          declared="$(bun scripts/desktop-version.ts --print)"
+          if [ "$version" != "$declared" ]; then
+            echo "tag ${GITHUB_REF_NAME} says ${version}, but the app version is ${declared}" >&2
+            exit 1
+          fi
+          bun scripts/desktop-version.ts --check
+
+      - name: Build
+        run: bun run desktop:build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          OPENVIDS_RELEASE: "1"
+
+      - name: Collect Windows artifacts
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          bundle="apps/desktop/src-tauri/target/release/bundle"
+          setup="${bundle}/nsis/OpenVids_${version}_x64-setup.exe"
+          setup_sig="${bundle}/nsis/OpenVids_${version}_x64-setup.exe.sig"
+
+          for file in "$setup" "$setup_sig"; do
+            if [ ! -f "$file" ]; then
+              echo "missing bundle artifact: $file" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p release-assets
+          cp "$setup" "release-assets/OpenVids_${version}_x64-setup.exe"
+          cp "$setup_sig" "release-assets/OpenVids_${version}_x64-setup.exe.sig"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    name: Publish draft release ${{ github.ref_name }}
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1"
+
+      - name: Fetch the tag
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos
+          path: release-assets
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets
+
+      - name: Write latest.json with both platforms
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          app_tar="release-assets/OpenVids_${version}_aarch64.app.tar.gz"
+          app_sig="release-assets/OpenVids_${version}_aarch64.app.tar.gz.sig"
+          setup="release-assets/OpenVids_${version}_x64-setup.exe"
+          setup_sig="release-assets/OpenVids_${version}_x64-setup.exe.sig"
+
+          for file in "$app_tar" "$app_sig" "$setup" "$setup_sig"; do
+            if [ ! -f "$file" ]; then
+              echo "missing bundle artifact: $file" >&2
+              exit 1
+            fi
+          done
 
           notes=""
           if [ "$(git cat-file -t "${GITHUB_REF_NAME}" 2>/dev/null || true)" = "tag" ]; then
@@ -107,11 +243,13 @@ jobs:
             --arg version "$version" \
             --arg notes "$notes" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg signature "$(cat "$app_sig")" \
-            --arg url "https://github.com/bazodev/open-vids/releases/download/${GITHUB_REF_NAME}/OpenVids_${version}_aarch64.app.tar.gz" \
-            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {"darwin-aarch64": {signature: $signature, url: $url}}}' \
-            > "$stage/latest.json"
-          cat "$stage/latest.json"
+            --arg mac_signature "$(cat "$app_sig")" \
+            --arg mac_url "https://github.com/bazodev/open-vids/releases/download/${GITHUB_REF_NAME}/OpenVids_${version}_aarch64.app.tar.gz" \
+            --arg win_signature "$(cat "$setup_sig")" \
+            --arg win_url "https://github.com/bazodev/open-vids/releases/download/${GITHUB_REF_NAME}/OpenVids_${version}_x64-setup.exe" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {"darwin-aarch64": {signature: $mac_signature, url: $mac_url}, "windows-x86_64": {signature: $win_signature, url: $win_url}}}' \
+            > "release-assets/latest.json"
+          cat "release-assets/latest.json"
 
       - name: Create or update the draft release
         env:

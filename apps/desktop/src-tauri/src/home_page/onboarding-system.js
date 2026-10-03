@@ -1,8 +1,9 @@
 /* Onboarding step 4 — System check. GET /api/system/check lists Chrome, FFmpeg and ffprobe; a missing tool with
    `canInstall` gets an Install button driven by GET/POST /api/system/install/<tool> (+ /cancel), polled while it
    runs. The tool row is generic: it lights up for any tool whose check says canInstall and whose install state
-   arrives in `install[<tool>]`. FFmpeg is installed only through Homebrew and provides ffprobe too, so the two
-   are one install (ffprobe has no button of its own). Every string from the check or the installer is escaped. */
+   arrives in `install[<tool>]`. FFmpeg is installed through Homebrew on macOS and through an official-build
+   download on Windows, and provides ffprobe too, so the two are one install (ffprobe has no button of its own).
+   Every string from the check or the installer is escaped. */
 (function () {
   "use strict";
   const { ic, esc, api, CLICK, group, tr } = OVS;
@@ -226,7 +227,9 @@
               : tr(
                   c.installer === "homebrew"
                     ? "onboarding.system.installHomebrew"
-                    : "onboarding.system.install",
+                    : c.installer === "download"
+                      ? "onboarding.system.installDownload"
+                      : "onboarding.system.install",
                 ),
           )}</button>`
         : "";
@@ -255,6 +258,15 @@
                 { code: (inner) => `<code class="mono">${inner}</code>` },
               )
         }</p>`;
+      if (canInstall && c.installer === "download" && !failed)
+        extra += `<p class="st-foot">${rich(
+          "onboarding.system.downloadRuns",
+          { size: "115 MB" },
+          {
+            link: (inner) =>
+              `<button type="button" class="link" data-act="ob-open-ffmpeg" data-fk="ob-open-ffmpeg">${inner}</button>`,
+          },
+        )}</p>`;
       /* By hand: no installer here, or the installer failed. */
       const cmd = own && Y.check.platform === "macos" ? commandFor(key) : null;
       if (cmd && (!canInstall || failed)) {
@@ -338,6 +350,9 @@
   CLICK["ob-open-brew"] = () => {
     /* Opened by the shell only if it is an https address. */
     api("/api/open-external", { url: brew().url || "https://brew.sh" }).catch(() => {});
+  };
+  CLICK["ob-open-ffmpeg"] = () => {
+    api("/api/open-external", { url: "https://www.gyan.dev/ffmpeg/builds/" }).catch(() => {});
   };
   CLICK["ob-copy"] = (t) => {
     const cmd = t.dataset.v;

@@ -20,7 +20,7 @@ import {
   renameSync,
   readdirSync,
 } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, sep } from "node:path";
 import type { StudioApiAdapter } from "../types.js";
 import { isAudioFile } from "../helpers/mime.js";
 import { replaceFileAtomically } from "../helpers/atomicFile.js";
@@ -2321,7 +2321,8 @@ async function processUploadedFiles(
       if (n >= MAX_COPY_INDEX) skipped.push(name);
       continue;
     }
-    const relativePath = subDir ? join(subDir, finalName) : finalName;
+    // Project-relative paths are POSIX-style on the wire, on Windows too.
+    const relativePath = (subDir ? join(subDir, finalName) : finalName).split(sep).join("/");
     uploaded.push(relativePath);
     if (validation.unchecked) unchecked.push({ name: finalName, reason: validation.unchecked });
     if (isAudioFile(finalName)) {

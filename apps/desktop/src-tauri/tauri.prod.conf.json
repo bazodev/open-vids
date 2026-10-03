@@ -1,7 +1,6 @@
 {
   "bundle": {
     "resources": {
-      "../runtime/bun": "bun",
       "../runtime/serve.mjs": "serve.mjs",
       "../runtime/hyperframes": "hyperframes",
       "../runtime/agent-runtime": "agent-runtime",

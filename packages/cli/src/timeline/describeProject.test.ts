@@ -151,18 +151,23 @@ describe("describeProject", () => {
     expect(row!.children.length).toBe(2);
   });
 
-  it("does not follow a symlink out of the project", async () => {
-    const index = project();
-    const outside = tempDir("hf-outside-");
-    writeFileSync(join(outside, "secret.html"), TITLE);
-    symlinkSync(join(outside, "secret.html"), join(dir, "compositions", "link.html"));
-    writeFileSync(
-      index,
-      `<div data-composition-id="m"><div id="l" data-composition-src="compositions/link.html" data-start="0" data-duration="1"></div></div>`,
-    );
-    const [row] = (await describeProject(index)).tracks.flatMap((t) => t.rows);
-    expect(row!.children).toEqual([]);
-  });
+  // The fixture plants a real symlink, which needs elevation / Developer Mode
+  // on Windows (EPERM without it) — skip there; POSIX still guards this path.
+  it.skipIf(process.platform === "win32")(
+    "does not follow a symlink out of the project",
+    async () => {
+      const index = project();
+      const outside = tempDir("hf-outside-");
+      writeFileSync(join(outside, "secret.html"), TITLE);
+      symlinkSync(join(outside, "secret.html"), join(dir, "compositions", "link.html"));
+      writeFileSync(
+        index,
+        `<div data-composition-id="m"><div id="l" data-composition-src="compositions/link.html" data-start="0" data-duration="1"></div></div>`,
+      );
+      const [row] = (await describeProject(index)).tracks.flatMap((t) => t.rows);
+      expect(row!.children).toEqual([]);
+    },
+  );
 
   it("claims no duration source for a leaf with nothing authored and no children", async () => {
     const index = project();
@@ -214,20 +219,25 @@ describe("describeProject", () => {
     expect(text).toContain("pending: source reports no duration");
   });
 
-  it("does not probe a media src that is a symlink out of the project", async () => {
-    const outside = tempDir("hf-outside-");
-    copyFileSync(REAL_AUDIO, join(outside, "secret.mp3"));
-    const { rows } = await rowsOf(
-      `<div data-composition-id="m"><audio id="a" src="link.mp3" data-start="0"></audio></div>`,
-      false,
-      (root) => symlinkSync(join(outside, "secret.mp3"), join(root, "link.mp3")),
-    );
-    expect(rows[0]).toMatchObject({
-      durationSource: "pending",
-      pendingReason: "source file not found",
-      duration: 0,
-    });
-  });
+  // The fixture plants a real symlink, which needs elevation / Developer Mode
+  // on Windows (EPERM without it) — skip there; POSIX still guards this path.
+  it.skipIf(process.platform === "win32")(
+    "does not probe a media src that is a symlink out of the project",
+    async () => {
+      const outside = tempDir("hf-outside-");
+      copyFileSync(REAL_AUDIO, join(outside, "secret.mp3"));
+      const { rows } = await rowsOf(
+        `<div data-composition-id="m"><audio id="a" src="link.mp3" data-start="0"></audio></div>`,
+        false,
+        (root) => symlinkSync(join(outside, "secret.mp3"), join(root, "link.mp3")),
+      );
+      expect(rows[0]).toMatchObject({
+        durationSource: "pending",
+        pendingReason: "source file not found",
+        duration: 0,
+      });
+    },
+  );
 
   it("gives an image with no authored duration the resolver's default length", async () => {
     const logo = (await describeProject(project())).tracks
@@ -668,17 +678,44 @@ const hasJq = (() => {
   }
 })();
 
-const runOneLiner = async (line: string, timeline?: ProjectTimeline): Promise<string> => {
+// Windows in-process equivalent of the documented `node -e '...' <<<"$TL"`
+// one-liners: feed the timeline JSON on a fake stdin and capture console.log.
+async function runNodeOneLiner(line: string, input: string): Promise<string> {
+  const script = line.replace(/^node -e\s+'([\s\S]*)'\s*<<<"\$TL"$/, "$1");
+  const logged: string[] = [];
+  const sandboxConsole = { log: (...args: Array<unknown>) => logged.push(args.join(" ")) };
+  const sandboxRequire = (id: string): unknown => {
+    if (id === "fs") {
+      return { readFileSync: (_fd: unknown, _enc: unknown) => input };
+    }
+    throw new Error(`unexpected require(${id})`);
+  };
+  const runner = new Function("console", "require", script) as (
+    console: unknown,
+    require: unknown,
+  ) => void;
+  runner(sandboxConsole, sandboxRequire);
+  return logged.length > 0 ? `${logged.join("\n")}\n` : "";
+}
+
+const parseStream = (out: string) => JSON.parse(`[${out.replace(/}\s*{/g, "},{")}]`);
+
+async function runOneLiner(line: string, timeline?: ProjectTimeline): Promise<string> {
   const own = timeline ? null : inversionProject();
+  const input = JSON.stringify({ timeline: timeline ?? (await describeProject(own!)) });
+  if (process.platform === "win32") {
+    // Git-Bash on Windows cannot see `node` (PATH has no /mnt/c/Program
+    // Files/nodejs), so execFileSync("bash", ...) fails with ENOENT even
+    // though node runs the suite. Run the documented `node -e` payload
+    // in-process instead of shelling out (jq lines never reach here: hasJq
+    // is false without jq on PATH, and both jq tests bail out on !hasJq).
+    return runNodeOneLiner(line, input);
+  }
   return execFileSync("bash", ["-c", line], {
-    env: {
-      ...process.env,
-      TL: JSON.stringify({ timeline: timeline ?? (await describeProject(own!)) }),
-    },
+    env: { ...process.env, TL: input },
     encoding: "utf8",
   });
-};
-const parseStream = (out: string) => JSON.parse(`[${out.replace(/}\s*{/g, "},{")}]`);
+}
 
 describe("skill query one-liners", () => {
   it("documents five node one-liners, each answering from the fixture", async () => {

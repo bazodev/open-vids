@@ -22,10 +22,10 @@ import { useDomEditSelectionContext } from "../../contexts/DomEditContext";
 import { useFileManagerContext } from "../../contexts/FileManagerContext";
 import { generateId } from "../../utils/generateId";
 import { useTranslation } from "../../i18n";
+import { resolveShortcutKey } from "../../utils/platform";
+import { resolveModifierKey } from "../../utils/keyMatch";
 import { SectionHeader, SlideList, SlideInspector, BranchTree } from "./SlideshowSubPanels";
 import { HotspotTool } from "./SlideshowHotspotTool";
-
-// Re-export pure helpers so the test file can import from "./SlideshowPanel".
 export {
   toggleMainLineSlide,
   reorderMainLineSlide,
@@ -413,7 +413,7 @@ export function SlideshowPanel({ scenes, onPersist, onPersistNotes }: SlideshowP
       className="flex flex-col h-full overflow-y-auto text-fg"
       onKeyDown={(e) => {
         // In-panel undo — scoped so it never fights the app-level file undo.
-        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && resolveModifierKey(e.nativeEvent) === "z") {
           const target = e.target instanceof HTMLElement ? e.target.tagName : "";
           if (target === "TEXTAREA" || target === "INPUT") return;
           e.preventDefault();
@@ -443,7 +443,7 @@ export function SlideshowPanel({ scenes, onPersist, onPersistNotes }: SlideshowP
           <button
             type="button"
             onClick={handleUndo}
-            title={t("panels.slideshow.undoTitle", { key: "⌘Z" })}
+            title={t("panels.slideshow.undoTitle", { key: resolveShortcutKey("⌘Z") })}
             className="h-ctl-xs rounded-sm px-2 text-xs text-fg-2 transition-colors hover:bg-surface-2 hover:text-fg"
           >
             {t("panels.slideshow.undo", { depth: undoDepth })}

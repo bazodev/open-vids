@@ -483,8 +483,10 @@ describe("openProjectHistory", () => {
   it("refuses a checkout folder inside the project, however it is reached", async () => {
     const { history, write, projectDir, has } = await project({ "index.html": "v1" });
     const entry = await change(history, you, "Second", () => write("index.html", "v2"));
+    // Directory junctions need no privilege on Windows (unlike symlinks) and
+    // resolve like the symlinked alias does on POSIX.
     const alias = join(tempDir("hf-history-alias-"), "alias");
-    symlinkSync(projectDir, alias);
+    symlinkSync(projectDir, alias, process.platform === "win32" ? "junction" : "dir");
 
     for (const dir of [join(projectDir, "archive"), join(alias, "archive"), projectDir])
       await expect(history.checkout(entry.id, "after", dir)).rejects.toThrow("outside the project");
