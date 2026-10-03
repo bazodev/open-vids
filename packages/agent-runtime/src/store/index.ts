@@ -83,6 +83,16 @@ export class FileChatStore {
     }
   }
 
+  /**
+   * Waits until every in-flight append reached the event log. Shutdown and test teardown drain before deleting
+   * directories, so a still-running write cannot race the removal (on Windows the removal, or the write, fails).
+   */
+  async drain(): Promise<void> {
+    while (this.appendTails.size > 0) {
+      await Promise.allSettled([...this.appendTails.values()]);
+    }
+  }
+
   /** Creates and returns the private backend state directory for a chat's Director. */
   async stateDir(chatId: string): Promise<string> {
     const directory = resolve(chatDirectory(this.projectDir, chatId), "backend");

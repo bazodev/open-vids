@@ -90,6 +90,9 @@ export async function createRuntimeFixture(
     cleanup: async () => {
       await turns.dispose();
       await backend.dispose();
+      // `turns.dispose()` already drains, but belt and suspenders: the directory must only go once no store write
+      // is still in flight (Windows fails the removal, or the write, when they overlap).
+      await chats.drain();
       await rm(root, { recursive: true, force: true });
     },
   };

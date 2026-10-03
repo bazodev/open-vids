@@ -919,6 +919,9 @@ export class TurnRunner {
       await active.task?.catch(() => undefined);
     }
     await this.sessionManager.dispose();
+    // The turn's fire-and-forget `onModel` updates may still be appending when the run ended: await them before the
+    // caller deletes the project directory, or the write races the removal (ENOENT/ENOTEMPTY on Windows).
+    await this.chats.drain();
   }
 
   /** Heartbeat: keeps the turn's transaction open for the whole turn, however long it pauses between writes. */

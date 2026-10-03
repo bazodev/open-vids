@@ -223,6 +223,17 @@ export class ChatService {
     }
   }
 
+  /**
+   * Waits until every queued event (including fire-and-forget `onModel` updates) reached the store. Shutdown and
+   * test teardown drain before deleting directories, so no append can still be in flight when its directory goes.
+   */
+  async drain(): Promise<void> {
+    while (this.eventTails.size > 0) {
+      await Promise.allSettled([...this.eventTails.values()]);
+    }
+    await this.store.drain();
+  }
+
   subscribeChat(
     chatId: string,
     after: number,

@@ -38,6 +38,25 @@ describe("runtime persistence and prompt rendering", () => {
     }
   });
 
+  it("drain waits for fire-and-forget emits so teardown can remove the directory", async () => {
+    const fixture = await createRuntimeFixture();
+    try {
+      const chat = await fixture.chats.create({ title: "Drain" });
+      // The orchestrator's `onModel` path emits without awaiting: the write may still be in flight when the turn ends.
+      const pending = fixture.chats.emit(chat.id, {
+        type: "chat.updated",
+        chat: { ...chat, title: "Late update" },
+      });
+      await fixture.chats.drain();
+      await pending;
+      expect(fixture.chats.get(chat.id)?.chat.title).toBe("Late update");
+      const loaded = await fixture.store.load(chat.id);
+      expect(loaded.state?.chat.title).toBe("Late update");
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("renders editor context and references as explicit prompt blocks", () => {
     const rendered = renderPromptContext(
       "Make the intro shorter",
