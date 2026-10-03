@@ -3060,6 +3060,7 @@
   "panels.slideshow.hotspot.onSlide": "Hotspots on this slide",
   "panels.slideshow.hotspot.removeLabel": "Remove hotspot {label}",
   "renders.title": "Export",
+  "renders.settings.lockedNotice": "Settings can be changed after the render finishes.",
   "renders.dismissError": "Dismiss error",
   "renders.installFfmpeg": "Install FFmpeg to render",
   "renders.installFfmpegTitle": "Install FFmpeg to render. See the note above.",

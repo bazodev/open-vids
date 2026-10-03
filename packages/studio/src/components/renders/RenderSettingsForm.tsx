@@ -181,7 +181,7 @@ function FieldRow({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** "Uses current variable values · 1 overridden": what the render injects, with a way to edit it. */
-function VariablesLine() {
+function VariablesLine({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
   const overridden = usePreviewVariablesStore((state) =>
     state.values ? Object.keys(state.values).length : 0,
@@ -204,8 +204,9 @@ function VariablesLine() {
       </span>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => useDockLayoutStore.getState().activatePanel("variables")}
-        className="shrink-0 rounded-xs text-xs text-fg-2 underline decoration-border-strong underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+        className="shrink-0 rounded-xs text-xs text-fg-2 underline decoration-border-strong underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:cursor-not-allowed disabled:text-fg-3 disabled:no-underline"
       >
         {t("renders.settings.editVariables")}
       </button>
@@ -286,7 +287,7 @@ export function RenderSettingsForm({
           />
         </FieldRow>
       )}
-      <VariablesLine />
+      <VariablesLine disabled={disabled} />
     </div>
   );
 }

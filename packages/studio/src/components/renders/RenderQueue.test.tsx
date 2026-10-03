@@ -37,6 +37,7 @@ function mountRenderQueue(
   onStartRender: Mock<StartRenderHandler>,
   compositionDimensions = { width: 1920, height: 1080 },
   jobs: RenderJob[] = [],
+  isRendering = false,
 ) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -50,7 +51,7 @@ function mountRenderQueue(
         onOpen={vi.fn()}
         onClearCompleted={vi.fn()}
         onStartRender={onStartRender}
-        isRendering={false}
+        isRendering={isRendering}
         compositionDimensions={compositionDimensions}
         ffmpeg={ffmpegStatus}
         ffmpegChecking={false}
@@ -175,6 +176,73 @@ describe("RenderQueue controls", () => {
 
     expect(getPersistedRenderSettings()).toEqual({
       format: "mov",
+      quality: "standard",
+      fps: 30,
+    });
+  });
+  it("locks settings controls and shows a notice while a render is active", () => {
+    const activeJob: RenderJob = {
+      id: "active",
+      status: "rendering",
+      progress: 42,
+      filename: "active.mp4",
+      createdAt: 1,
+    };
+    const host = mountRenderQueue(vi.fn(), undefined, [activeJob], true);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(
+      "Settings can be changed after the render finishes.",
+    );
+    for (const label of ["Resolution", "Frame rate", "Format"]) {
+      expect(triggerFor(host, label).hasAttribute("disabled")).toBe(true);
+    }
+    const quality = host.querySelector('[role="radiogroup"][aria-label="Quality"]');
+    expect(quality?.querySelectorAll("button[disabled]")).toHaveLength(3);
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>("button")];
+    expect(buttons.find((button) => button.textContent?.includes("Cancel Render"))?.disabled).toBe(
+      false,
+    );
+    expect(buttons.find((button) => button.textContent?.includes("Edit"))?.disabled).toBe(true);
+  });
+
+  it("leaves settings enabled with no notice when idle or finished", () => {
+    const terminalStatuses: RenderJob["status"][] = ["complete", "failed", "cancelled"];
+    const terminalJobs: RenderJob[] = terminalStatuses.map((status) => ({
+      id: status,
+      status,
+      progress: 100,
+      filename: `${status}.mp4`,
+      createdAt: 1,
+    }));
+    const host = mountRenderQueue(vi.fn(), undefined, terminalJobs);
+    expect(host.querySelector('[role="status"]')).toBeNull();
+    for (const label of ["Resolution", "Frame rate", "Format"]) {
+      expect(triggerFor(host, label).hasAttribute("disabled")).toBe(false);
+    }
+    expect(
+      host.querySelector('[role="radiogroup"][aria-label="Quality"] button:disabled'),
+    ).toBeNull();
+    expect(host.querySelector('[data-testid="renders-export"]')?.hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("does not persist or change a setting when its control is disabled", async () => {
+    const host = mountRenderQueue(vi.fn(), undefined, [], true);
+    const format = triggerFor(host, "Format");
+    fire(format, "click");
+    await settle();
+    expect(document.querySelector('[role="option"]')).toBeNull();
+    expect(getPersistedRenderSettings()).toEqual({
+      format: "mp4",
+      quality: "standard",
+      fps: 30,
+    });
+    const quality = host.querySelector<HTMLButtonElement>(
+      '[role="group"][aria-label="Quality"] button',
+    );
+    quality?.click();
+    expect(getPersistedRenderSettings()).toEqual({
+      format: "mp4",
       quality: "standard",
       fps: 30,
     });

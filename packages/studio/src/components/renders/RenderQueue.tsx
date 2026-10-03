@@ -224,6 +224,14 @@ export const RenderQueue = memo(function RenderQueue({
         {running.map((job) => (
           <RenderJobStatus key={job.id} job={job} onCancel={() => onCancel?.(job.id)} />
         ))}
+        {isRendering && (
+          <p
+            role="status"
+            className="m-0 rounded-md border border-border-subtle bg-bg-1 px-2.5 py-2 text-xs text-fg-2"
+          >
+            {t("renders.settings.lockedNotice")}
+          </p>
+        )}
         <RenderSettingsForm
           state={settingsState}
           disabled={isRendering}

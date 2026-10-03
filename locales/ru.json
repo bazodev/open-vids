@@ -3060,6 +3060,7 @@
   "panels.slideshow.hotspot.onSlide": "Хот-споты на этом слайде",
   "panels.slideshow.hotspot.removeLabel": "Убрать хот-спот «{label}»",
   "renders.title": "Экспорт",
+  "renders.settings.lockedNotice": "Настройки можно будет изменить после завершения рендера.",
   "renders.dismissError": "Закрыть сообщение об ошибке",
   "renders.installFfmpeg": "Установите FFmpeg для рендера",
   "renders.installFfmpegTitle": "Установите FFmpeg для рендера. См. примечание выше.",

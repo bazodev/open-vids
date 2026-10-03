@@ -56,7 +56,7 @@ export function Select({
         className={cn(
           fieldBase,
           fieldSizes[size],
-          "w-full cursor-pointer justify-between text-left",
+          "w-full cursor-pointer justify-between text-left disabled:cursor-not-allowed disabled:opacity-50",
           "data-[popup-open]:border-border-strong",
           className,
         )}
