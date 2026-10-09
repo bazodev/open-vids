@@ -118,6 +118,8 @@ describe("stripRuntimeFiles", () => {
     assert.equal(shouldStripRuntimeFile("index.js.map"), true);
     assert.equal(shouldStripRuntimeFile("index.d.ts"), true);
     assert.equal(shouldStripRuntimeFile("index.d.mts"), true);
+    /* the OMP SDK imports these as text at startup (`with { type: "text" }`) */
+    assert.equal(shouldStripRuntimeFile("declarations.d.ts"), false);
     assert.equal(shouldStripRuntimeFile("index.js"), false);
     assert.equal(shouldStripRuntimeFile("binding.node"), false);
   });

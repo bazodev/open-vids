@@ -51,7 +51,9 @@
  *   whatever the source carries) stays, because `tauri-build` copies resources
  *   with `fs::copy`, which propagates the mode.
  * - On Windows the staged `node_modules` trees are stripped of sourcemaps and
- *   type declarations bun never loads (`*.map`, `*.d.ts` and kin), and two
+ *   type declarations bun never loads (`*.map`, `*.d.ts` and kin, except the
+ *   `declarations.d.ts` files the OMP SDK imports as text — see
+ *   `KEPT_RUNTIME_FILES`), and two
  *   version-split families are pinned to one version through `overrides`
  *   (see `STAGED_VERSION_OVERRIDES`): without the pins the OTLP exporters
  *   nest a second copy of `@opentelemetry/resources`/`sdk-metrics`, and
@@ -240,12 +242,23 @@ export function pruneForeignPrebuilds(roots, hints) {
  * declarations are the longest and most numerous files in the staged trees
  * (thousands of `.map`/`.d.ts` files under `@opentelemetry`); stripping them
  * on Windows buys back the `MAX_PATH` headroom the NSIS install needs (see
- * the header) and shrinks the installer. macOS trees keep them, so the macOS
+ * the header) and shrinks the installer, except the `KEPT_RUNTIME_FILES`
+ * below that bun does load. macOS trees keep them, so the macOS
  * bundle is unchanged.
  */
 export const STRIPPED_RUNTIME_EXTENSIONS = [".map", ".d.ts", ".d.mts", ".d.cts", ".tsbuildinfo"];
 
+/**
+ * `.d.ts` files bun DOES load: `@oh-my-pi/pi-coding-agent` imports its
+ * `declarations.d.ts` files as text (`import x from "./declarations.d.ts" with
+ * { type: "text" }` in `archive|tools/browser|tools/computer/prelude-definition.ts`),
+ * so stripping them makes the agent runtime die at startup with
+ * `Cannot find module './declarations.d.ts'`.
+ */
+export const KEPT_RUNTIME_FILES = ["declarations.d.ts"];
+
 export function shouldStripRuntimeFile(fileName) {
+  if (KEPT_RUNTIME_FILES.includes(fileName)) return false;
   return STRIPPED_RUNTIME_EXTENSIONS.some((ext) => fileName.endsWith(ext));
 }
 
