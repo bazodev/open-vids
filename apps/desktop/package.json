@@ -1,6 +1,6 @@
 {
   "name": "@openvids/desktop",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "description": "OpenVids — agent-native desktop video editor",
   "homepage": "https://openvids.ai",
