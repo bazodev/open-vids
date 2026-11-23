@@ -13,6 +13,7 @@ import {
   type ParsedAnalysis,
 } from "@hyperframes/agent-protocol";
 import type { HostToolResult, ToolProgress } from "../backend.js";
+import { isBlankArgument } from "../editing/args.js";
 import { EditingError, type EditingHost } from "../editing/host.js";
 import { formatError } from "../editing/format.js";
 import { errorMessage } from "../errors.js";
@@ -88,11 +89,18 @@ function argsRecord(args: unknown): Record<string, unknown> {
   return args;
 }
 
-/** Models send `null` for arguments they leave out; only `hook: null` (remove the hook) means something. */
-function withoutNulls(args: unknown): unknown {
+/**
+ * Models send `null`, blank text or an empty `order` for arguments they leave out. `hook: null` (remove the hook) and
+ * the other empty lists (`removeIssues: []` cuts no take issue) are real values and stay.
+ */
+function withoutBlanks(args: unknown): unknown {
   if (!isRecord(args)) return args;
   return Object.fromEntries(
-    Object.entries(args).filter(([key, value]) => value !== null || key === "hook"),
+    Object.entries(args).filter(([key, value]) => {
+      if (value === null) return key === "hook";
+      if (Array.isArray(value)) return key !== "order" || value.length > 0;
+      return !isBlankArgument(value);
+    }),
   );
 }
 
@@ -197,7 +205,7 @@ export class TurnAnalysis {
     const { host } = this.options;
     switch (name) {
       case ANALYSIS_TOOL_NAMES.analyze: {
-        const request = checked(parseAnalyzeRequest(withoutNulls(args)));
+        const request = checked(parseAnalyzeRequest(withoutBlanks(args)));
         const job = await analyzeAndWait(host, request, signal, {
           pollMs: this.options.pollMs ?? JOB_POLL_MS,
           ...(this.options.stallMs !== undefined && { stallMs: this.options.stallMs }),
@@ -209,7 +217,7 @@ export class TurnAnalysis {
         return { text: formatOverview(await host.overview(request.source, signal), job) };
       }
       case ANALYSIS_TOOL_NAMES.read: {
-        const record = argsRecord(withoutNulls(args));
+        const record = argsRecord(withoutBlanks(args));
         const source = sourceOf(record);
         const section =
           record.section === undefined
@@ -232,7 +240,7 @@ export class TurnAnalysis {
         };
       }
       case ANALYSIS_TOOL_NAMES.transcript: {
-        const record = argsRecord(withoutNulls(args));
+        const record = argsRecord(withoutBlanks(args));
         const source = sourceOf(record);
         const from = timeArg(record.from, "from");
         const to = timeArg(record.to, "to");
@@ -254,7 +262,7 @@ export class TurnAnalysis {
         return { text: formatSavedSegments(await host.saveSegments(request, signal)) };
       }
       case ANALYSIS_TOOL_NAMES.frames: {
-        const request = checked(parseFramesRequest(withoutNulls(args)));
+        const request = checked(parseFramesRequest(withoutBlanks(args)));
         const cap = this.options.framesPerSource;
         // The budget belongs to the file, whichever way the model spells its path.
         const key = sourceKey(this.options.projectDir, request.source);
@@ -291,7 +299,7 @@ export class TurnAnalysis {
         };
       }
       case ANALYSIS_TOOL_NAMES.plan: {
-        const request = checked(parseCutPlanRequest(withoutNulls(args)));
+        const request = checked(parseCutPlanRequest(withoutBlanks(args)));
         const plan = await host.planCut(request, signal);
         this.planRanges.set(plan.id, plan.ranges.length);
         // The planner cannot see pictures: say which detected picture problems stay in this cut unseen by Vision.
@@ -313,7 +321,7 @@ export class TurnAnalysis {
     const { host, editing, turnId } = this.options;
     if (!editing)
       throw new AnalysisToolError("unavailable", "Editing is not available in this runtime.");
-    const record = argsRecord(withoutNulls(args));
+    const record = argsRecord(withoutBlanks(args));
     const planId = planArg(record);
     const composition =
       typeof record.composition === "string" && record.composition.length > 0

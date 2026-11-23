@@ -67,6 +67,11 @@ export interface OperationSchema {
   additionalProperties: false;
 }
 
+/**
+ * One operation of `edit_timeline`. An optional list declares no `minItems`: a model that fills it with `[]` means "not
+ * given" (`withoutBlankArguments`), and with a minimum the SDK would refuse the whole union before that reading, naming
+ * the required fields of an unrelated operation.
+ */
 export function operationSchema(
   op: EditOperationName,
   description: string,

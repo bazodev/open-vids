@@ -293,6 +293,95 @@ describe("edit_timeline: dry run", () => {
   });
 });
 
+describe("editing arguments a model leaves blank", () => {
+  const edit = (operation: Record<string, unknown>) => ({ operations: [operation] });
+
+  it.each([
+    ["null", { clip: null, clips: ["a", "b"] }, { clips: ["a", "b"] }],
+    ["an empty string", { clip: "", clips: ["a", "b"] }, { clips: ["a", "b"] }],
+    ["blank text", { clip: "  ", clips: ["a", "b"] }, { clips: ["a", "b"] }],
+    ["an empty list", { clip: "a", clips: [] }, { clip: "a" }],
+  ])("reads %s as not given on remove_clip", async (_label, given, expected) => {
+    const { host, call } = setup();
+    const result = await call("edit_timeline", edit({ op: "remove_clip", ...given }));
+    expect(result.isError).toBeUndefined();
+    expect(host.applyRequests[0]?.operations[0]).toEqual({ op: "remove_clip", ...expected });
+  });
+
+  it("ignores blank values of fields that belong to another operation", async () => {
+    const { host, call } = setup();
+    const result = await call(
+      "edit_timeline",
+      edit({ op: "remove_clip", clip: "a", text: "", start: null, cues: [] }),
+    );
+    expect(result.isError).toBeUndefined();
+    expect(host.applyRequests[0]?.operations[0]).toEqual({ op: "remove_clip", clip: "a" });
+  });
+
+  it("reads blank batch options as not given", async () => {
+    const { host, call } = setup();
+    const result = await call("edit_timeline", {
+      ...setLength,
+      composition: "",
+      baseVersion: null,
+      dryRun: null,
+    });
+    expect(result.isError).toBeUndefined();
+    expect(host.applyRequests[0]).not.toHaveProperty("composition");
+    expect(host.applyRequests[0]).not.toHaveProperty("dryRun");
+  });
+
+  it("still refuses remove_clip with two real targets or with none", async () => {
+    const { host, call } = setup();
+    for (const given of [
+      { clip: "a", clips: ["b"] },
+      { clip: "", clips: [] },
+      { clip: null, clips: null },
+    ]) {
+      const result = await call("edit_timeline", edit({ op: "remove_clip", ...given }));
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("remove_clip needs exactly one of clip or clips");
+    }
+    expect(host.applyRequests).toHaveLength(0);
+  });
+
+  it("still names a required field that was left blank", async () => {
+    const { host, call } = setup();
+    const result = await call(
+      "edit_timeline",
+      edit({ op: "add_text", text: "", start: 0, duration: 1, track: 0 }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("text must be a non-empty string");
+    expect(host.applyRequests).toHaveLength(0);
+  });
+
+  it("never drops a blank entry from a list of targets", async () => {
+    const { host, call } = setup();
+    const result = await call("edit_timeline", edit({ op: "remove_clip", clips: ["a", ""] }));
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("clips[1] must be a non-empty string");
+    expect(host.applyRequests).toHaveLength(0);
+  });
+
+  it("reads blank arguments of the other editing tools as not given", async () => {
+    const { host, call } = setup();
+    host.timelineResult = snapshot([clip("a")]);
+    const timeline = await call("inspect_timeline", {
+      composition: "",
+      track: null,
+      from: null,
+      to: null,
+      offset: null,
+      limit: null,
+    });
+    expect(timeline.isError).toBeUndefined();
+    expect(timeline.text).toContain("a.mp4");
+    expect(host.timelineRequests.at(-1)).toBeUndefined();
+    expect((await call("inspect_project", { query: "", kind: null })).isError).toBeUndefined();
+  });
+});
+
 describe("edit_timeline: results", () => {
   it("shows operation notes and warnings", async () => {
     const { host, call } = setup();

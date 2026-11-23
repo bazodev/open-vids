@@ -53,10 +53,35 @@ export function optionalAssetKind(
   return kind;
 }
 
+/** What a model sends for an argument it leaves out: `null`, blank text or an empty list. */
+export function isBlankArgument(value: unknown): boolean {
+  return (
+    value === null ||
+    (typeof value === "string" && value.trim().length === 0) ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+/**
+ * The arguments without those a model left blank, at every depth. No editing argument takes a blank value (its reader
+ * refuses one), so this cannot change a valid call. Entries of a list stay: dropping one would silently change what
+ * a batch acts on, so a blank entry is still refused.
+ */
+export function withoutBlankArguments(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutBlankArguments);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => !isBlankArgument(entry))
+      .map(([key, entry]) => [key, withoutBlankArguments(entry)]),
+  );
+}
+
 export function argsRecord(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
-  if (!isRecord(args)) throw invalid("arguments must be a JSON object");
-  return args;
+  const cleaned = withoutBlankArguments(args);
+  if (!isRecord(cleaned)) throw invalid("arguments must be a JSON object");
+  return cleaned;
 }
 
 export { invalid };

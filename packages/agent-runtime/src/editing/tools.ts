@@ -288,7 +288,6 @@ const OPERATION_SCHEMAS: Record<EditOperationName, OperationSchema> = {
       clip: clipId,
       clips: {
         type: "array",
-        minItems: 1,
         maxItems: EDIT_LIMITS.removeClips,
         items: clipId,
         description: "Clip ids to remove, all at once (for example a previous rough cut).",
