@@ -69,4 +69,13 @@ describe("toolFailureMessage", () => {
     expect(long.length).toBeLessThanOrEqual(FAILURE_MESSAGE_LIMIT);
     expect(long.endsWith("…")).toBe(true);
   });
+
+  it("masks a Google API key, bare or in a request URL, and leaves prose about a key alone", () => {
+    const key = `AIza${"Sy0123456789abcdefghijklmnopqrstu"}`;
+    expect(toolFailureMessage(`invalid credential ${key}`)).toBe("invalid credential [hidden]");
+    expect(toolFailureMessage(`POST /v1beta/models/x:generate?alt=sse&key=abcdef123456 503`)).toBe(
+      "POST /v1beta/models/x:generate?alt=sse&key=[hidden] 503",
+    );
+    expect(toolFailureMessage("Unknown key: durationSeconds")).toBe("Unknown key: durationSeconds");
+  });
 });

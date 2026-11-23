@@ -134,6 +134,16 @@ const ACTIVITY_STATE: Record<Activity["status"], WorkState> = {
   failed: "failed",
 };
 
+const ACTIVITY_NOTE =
+  "mb-1 ml-[30px] line-clamp-3 text-xs leading-[15px] text-fg-3 [overflow-wrap:anywhere]";
+
+/** Why the model call of a `provider_retry` row failed, in the provider's own words; null for any other row. */
+function providerRetryReason(activity: Activity): string | null {
+  if (activity.labelCode !== "provider_retry") return null;
+  const reason = activity.labelParams?.reason;
+  return typeof reason === "string" && reason.length > 0 ? reason : null;
+}
+
 /**
  * One product-level unit of an agent's own work ("Reading 3 files") as a Working-list row; never a raw tool
  * name. A render that reports progress gets a determinate meter. Targets open on request.
@@ -152,6 +162,11 @@ export function ActivityRow({ activity, agent }: { activity: Activity; agent: Ag
   const phrase =
     progress === null ? text : t("chat.activity.withProgress", { label: text, percent });
   const expandable = activity.targets.length > 0;
+  const retryReason = providerRetryReason(activity);
+  const failure =
+    state === "failed" && activity.error
+      ? describeServerError(activity.error.code, activity.error.message)
+      : null;
 
   const body = (
     <>
@@ -187,14 +202,16 @@ export function ActivityRow({ activity, agent }: { activity: Activity; agent: Ag
       ) : (
         <div className={cn(workRowGrid, WORK_ROW_TONE[state])}>{body}</div>
       )}
-      {state === "failed" && activity.error && (
-        <p
-          data-testid="activity-error"
-          title={activity.error.message}
-          className="mb-1 ml-[30px] line-clamp-3 text-xs leading-[15px] text-fg-3 [overflow-wrap:anywhere]"
-        >
+      {retryReason !== null && retryReason !== failure && (
+        <p data-testid="activity-retry-reason" title={retryReason} className={ACTIVITY_NOTE}>
           <span className="sr-only">{t("chat.activity.reason")} </span>
-          {describeServerError(activity.error.code, activity.error.message)}
+          {retryReason}
+        </p>
+      )}
+      {failure !== null && (
+        <p data-testid="activity-error" title={activity.error?.message} className={ACTIVITY_NOTE}>
+          <span className="sr-only">{t("chat.activity.reason")} </span>
+          {failure}
         </p>
       )}
       {open && expandable && (

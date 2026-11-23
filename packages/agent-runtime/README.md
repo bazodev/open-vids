@@ -1057,8 +1057,8 @@ every tool, which models were seen gluing onto tool names (`i_inspect_timeline`)
 tool names for Anthropic OAuth is the SDK's and cannot be changed here.
 
 What the SDK does around a model call is visible. `auto_retry_start/end` and `auto_compaction_start/end` become labelled
-activity rows (`provider_retry` with `attempt`, `maxAttempts`, `delaySeconds`; `context_compaction`) from start to end
-(`src/omp/maintenance.ts`). A failed tool row carries `Activity.error` (`tool_failed` + the tool's own text, trimmed to 300
+activity rows (`provider_retry` with `attempt`, `maxAttempts`, `delaySeconds` and the provider's `reason`, trimmed and with
+credentials masked, which the row shows under its label; `context_compaction`) from start to end (`src/omp/maintenance.ts`). A failed tool row carries `Activity.error` (`tool_failed` + the tool's own text, trimmed to 300
 characters with anything credential-shaped masked). A provider failure rejects the prompt with a `RuntimeError` classified
 from the message (`provider_auth`, `rate_limited`, `provider_overloaded`, `context_overflow`, else `agent_failed`; says so
 when the SDK retried first; `src/omp/provider-errors.ts`) and `failureCode(error)` (errors.ts) gives the turn's error code.
