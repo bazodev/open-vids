@@ -29,9 +29,9 @@
   "dependencies": {
     "@hono/node-server": "^2.0.5",
     "@hyperframes/agent-protocol": "workspace:*",
-    "@oh-my-pi/pi-ai": "18.8.3",
-    "@oh-my-pi/pi-catalog": "18.8.3",
-    "@oh-my-pi/pi-coding-agent": "18.8.3",
+    "@oh-my-pi/pi-ai": "19.1.1",
+    "@oh-my-pi/pi-catalog": "19.1.1",
+    "@oh-my-pi/pi-coding-agent": "19.1.1",
     "hono": "^4.0.0",
     "linkedom": "^0.18.12",
     "tldts": "^7.0.30"

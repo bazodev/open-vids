@@ -29,6 +29,8 @@ function optionFor(
 ): { flow: OAuthFlow; callbackPort: number | null; fixedPort: boolean } | null {
   const login = policy.login;
   if (!login || policy.available === false || policy.showInLoginList === false) return null;
+  // A paused provider refuses the login, and a login with an account-risk warning needs a consent step this UI lacks.
+  if (policy.disabled !== undefined || policy.loginWarning !== undefined) return null;
   switch (login.kind) {
     case "oauth-code": {
       const callback = login.callback;
