@@ -837,8 +837,9 @@ export interface Activity {
   label: string;
   /**
    * `activity.<labelCode>` locale key for `label`; the UI prefers it when present, `label` is the fallback. Besides
-   * the tool codes, the runtime reports `provider_retry` (params `attempt`, `maxAttempts`, `delaySeconds`) while it
-   * waits to retry a failed model call and `context_compaction` while the conversation is being summarised.
+   * the tool codes, the runtime reports `provider_retry` (params `attempt`, `maxAttempts`, `delaySeconds` and, when the
+   * provider said why, `reason`: its text, trimmed and with credentials masked) while it waits to retry a failed model
+   * call and `context_compaction` while the conversation is being summarised.
    */
   labelCode?: string;
   /** Placeholder values for `activity.<labelCode>`. */

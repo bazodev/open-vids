@@ -251,4 +251,129 @@ describe("CompositionThumbnail", () => {
     expect(MockImage.instances).toHaveLength(1);
     expect(MockImage.instances[0]?.src).toBe("blob:composition-thumbnail");
   });
+
+  describe("across an edit (a new content revision)", () => {
+    type Props = React.ComponentProps<typeof CompositionThumbnail>;
+    const base: Props = {
+      previewUrl: "/api/projects/demo/preview",
+      label: "",
+      labelColor: "#fff",
+      projectId: "demo",
+    };
+    let fetches: Array<{ resolve: (response: Response) => void; reject: (e: Error) => void }>;
+
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const draw = (props: Partial<Props>) =>
+      act(async () => {
+        root!.render(React.createElement(CompositionThumbnail, { ...base, ...props }));
+        await settle();
+      });
+    const shownSrc = () => host.querySelector("img")?.getAttribute("src") ?? null;
+    const shimmering = () => host.querySelector(".animate-pulse") !== null;
+
+    async function finish(index: number): Promise<void> {
+      await act(async () => {
+        fetches[index]?.resolve(new Response(new Blob(["poster"]), { status: 200 }));
+        await settle();
+      });
+      const probe = MockImage.instances.at(-1);
+      await act(async () => {
+        if (probe) {
+          probe.naturalWidth = 1920;
+          probe.naturalHeight = 1080;
+          probe.onload?.();
+        }
+        await settle();
+      });
+    }
+
+    beforeEach(() => {
+      // The shared scheduler caches posters by URL: a revision another test loaded would be ready at once.
+      thumbnailScheduler.invalidateProject("demo");
+      vi.mocked(URL.revokeObjectURL).mockClear();
+      fetches = [];
+      let blobs = 0;
+      URL.createObjectURL = vi.fn(() => `blob:poster-${(blobs += 1)}`);
+      globalThis.fetch = vi.fn(
+        (_url, init) =>
+          new Promise<Response>((resolve, reject) => {
+            fetches.push({ resolve, reject });
+            // A superseded request must give its slot back, or the next test's fetch never starts.
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      );
+      root = createRoot(host);
+    });
+
+    it("keeps the old poster, without a shimmer, until the new one is ready", async () => {
+      await draw({ contentRevision: 0 });
+      await finish(0);
+      expect(shownSrc()).toBe("blob:poster-1");
+
+      await draw({ contentRevision: 1 });
+      expect(fetches).toHaveLength(2);
+      expect(shownSrc()).toBe("blob:poster-1");
+      expect(shimmering()).toBe(false);
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:poster-1");
+
+      await finish(1);
+      expect(shownSrc()).toBe("blob:poster-2");
+    });
+
+    it("holds through several quick edits", async () => {
+      await draw({ contentRevision: 0 });
+      await finish(0);
+      await draw({ contentRevision: 1 });
+      await draw({ contentRevision: 2 });
+
+      expect(shownSrc()).toBe("blob:poster-1");
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:poster-1");
+
+      await finish(2);
+      expect(shownSrc()).toBe("blob:poster-2");
+    });
+
+    it("keeps the old poster when the new one fails", async () => {
+      await draw({ contentRevision: 0 });
+      await finish(0);
+      await draw({ contentRevision: 1 });
+
+      await act(async () => {
+        fetches[1]?.reject(new Error("render failed"));
+        await settle();
+      });
+
+      expect(shownSrc()).toBe("blob:poster-1");
+    });
+
+    it("does not show the old poster for a different picture", async () => {
+      await draw({ selector: ".one", contentRevision: 0 });
+      await finish(0);
+      expect(shownSrc()).toBe("blob:poster-1");
+
+      await draw({ selector: ".two", contentRevision: 0 });
+
+      expect(shownSrc()).toBeNull();
+      expect(shimmering()).toBe(true);
+    });
+
+    it("gives up the old poster's lease once the new one is ready and on unmount", async () => {
+      await draw({ contentRevision: 0 });
+      await finish(0);
+      await draw({ contentRevision: 1 });
+      const during = thumbnailScheduler.getDiagnostics().leases;
+      await finish(1);
+      const after = thumbnailScheduler.getDiagnostics().leases;
+      // During the swap: one on the new request, one holding the old poster, plus the old poster
+      // no longer held by the request itself. After it: both leases sit on the new poster alone.
+      expect(during).toBe(2);
+      expect(after).toBe(2);
+
+      act(() => root?.unmount());
+      root = null;
+      expect(thumbnailScheduler.getDiagnostics().leases).toBe(0);
+    });
+  });
 });

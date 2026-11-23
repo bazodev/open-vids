@@ -34,7 +34,7 @@ import { OAuthLogins, type LoginController } from "../oauthLogins.ts";
 import { LayeredAuthCredentialStore, isOpenVidsCredentialId } from "./layered-auth-store.ts";
 import { oauthLoginOptions, providerOAuthInfo } from "./oauth-support.ts";
 import { humanReadableError } from "./events.ts";
-import { mapModelInfo } from "./model-mapping.ts";
+import { isAgentProvider, mapModelInfo } from "./model-mapping.ts";
 import {
   OmpCatalogUnavailableError,
   catalogSources,
@@ -463,6 +463,7 @@ class OmpBackend implements AgentBackend {
     }
     const known = new Map<string, { models: number; authenticated: boolean }>();
     for (const model of registry.getAll()) {
+      if (!isAgentProvider(model.provider)) continue;
       const entry = known.get(model.provider) ?? { models: 0, authenticated: false };
       entry.models += 1;
       entry.authenticated = entry.authenticated || registry.hasConfiguredAuth(model);

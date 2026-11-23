@@ -69,6 +69,7 @@ vi.mock("../utils/optionalPackages.js", () => ({
         clientOptions.push(options);
       }
     },
+    ThinkingLevel: { MINIMAL: "MINIMAL", LOW: "LOW" },
   })),
 }));
 
@@ -523,7 +524,7 @@ describe("captionImagesWithGemini — Vertex AI provider", () => {
     expect(clientOptions[0]).toMatchObject({
       vertexai: true,
       project: "prefab-kit-000000",
-      location: "us-central1",
+      location: "global",
       googleAuthOptions: { credentials: JSON.parse(SERVICE_ACCOUNT) },
     });
     expect(clientOptions[0]).not.toHaveProperty("apiKey");
@@ -576,9 +577,26 @@ describe("captionImagesWithGemini — Vertex AI provider", () => {
     await captionImagesWithGemini(dir, () => {}, []);
 
     expect(generateContentMock).toHaveBeenCalledTimes(1);
-    expect(thinkingConfig).toEqual({ thinkingBudget: 0 });
-    // The API's flash-lite preview id is not resolvable on Vertex, so the default differs.
-    expect(model).toBe("gemini-2.5-flash");
+    expect(thinkingConfig).toEqual({ thinkingLevel: "MINIMAL" });
+    expect(model).toBe("gemini-3.5-flash-lite");
+  });
+
+  it("asks an overriding model only for a thinking level it has", async () => {
+    const dir = makeProjectWithImages();
+    dirs.push(dir);
+    vertexEnv();
+    vi.stubEnv("HYPERFRAMES_VERTEX_MODEL", "gemini-3.8-flash");
+    let thinkingConfig: unknown;
+    generateContentMock.mockImplementation(
+      async (request: { config?: { thinkingConfig?: unknown } }) => {
+        thinkingConfig = request.config?.thinkingConfig;
+        return { text: "A caption." };
+      },
+    );
+
+    await captionImagesWithGemini(dir, () => {}, []);
+
+    expect(thinkingConfig).toEqual({ thinkingLevel: "LOW" });
   });
 
   it("skips captioning when the service account is unparseable, without echoing it", async () => {

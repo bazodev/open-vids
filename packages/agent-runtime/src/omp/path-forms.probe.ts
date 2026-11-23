@@ -7,7 +7,7 @@
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { parseReadUrlTarget } from "@oh-my-pi/pi-coding-agent/tools/fetch";
 import { normalizePathLikeInput, resolveToCwd } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
-import { unwrapHashlineHeaderPath } from "@oh-my-pi/pi-coding-agent/tools/plan-mode-guard";
+import { unwrapHashlineHeaderPath } from "@oh-my-pi/pi-coding-agent/tools/hashline-header-path";
 import { cfgFetchEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { createSessionSettings } from "./catalog.ts";
 

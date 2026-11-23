@@ -530,11 +530,11 @@ describe("which providers offer an in-app sign-in", () => {
     expect(providerOAuthInfo("openrouter")?.flows).toEqual([
       { flow: "browser", callbackPort: 54549, fixedPort: false },
     ]);
-    expect(providerOAuthInfo("google-gemini-cli")?.flows[0]).toEqual({
-      flow: "browser",
-      callbackPort: 8085,
-      fixedPort: false,
-    });
+  });
+
+  it("offers no sign-in the SDK retired or paused", () => {
+    expect(providerOAuthInfo("google-gemini-cli")).toBeNull();
+    expect(providerOAuthInfo("google-antigravity")).toBeNull();
   });
 
   it("lists a provider's own login first and its device alternative after it", () => {

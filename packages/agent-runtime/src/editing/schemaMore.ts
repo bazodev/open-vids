@@ -73,7 +73,6 @@ export const MORE_OPERATION_SCHEMAS = {
       track: track("Optional track for the captions."),
       clips: {
         type: "array",
-        minItems: 1,
         maxItems: 200,
         items: clipId,
         description:
@@ -99,7 +98,6 @@ export const MORE_OPERATION_SCHEMAS = {
       track: track("Optional track for the captions."),
       lines: {
         type: "array",
-        minItems: 1,
         maxItems: 200,
         items: { type: "string", minLength: 1, maxLength: 64 },
         description: "Caption only the clips that speak these voiceover line ids (default: all).",
@@ -162,7 +160,6 @@ export const MORE_OPERATION_SCHEMAS = {
       clip: clipId,
       points: {
         type: "array",
-        minItems: 1,
         maxItems: EDIT_LIMITS.automationPoints,
         description: "Breakpoints; the volume moves in straight lines between them.",
         items: {
@@ -191,7 +188,6 @@ export const MORE_OPERATION_SCHEMAS = {
       clip: clipId,
       under: {
         type: "array",
-        minItems: 1,
         maxItems: EDIT_LIMITS.duckClips,
         items: clipId,
         description: "The clips that speak (their start–end spans are ducked under).",

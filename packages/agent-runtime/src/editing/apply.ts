@@ -8,6 +8,7 @@ import {
 } from "@hyperframes/agent-protocol";
 import type { HostToolResult } from "../backend.js";
 import type { WriteLeases } from "../writeLeases.js";
+import { withoutBlankArguments } from "./args.js";
 import { formatDryRun } from "./dryRun.js";
 import { formatEditResult } from "./format.js";
 import { EditingError, type EditingHost } from "./host.js";
@@ -75,7 +76,7 @@ export async function runEditTimeline(
   caller: AgentId,
   deps: EditTimelineDeps,
 ): Promise<HostToolResult> {
-  const parsed = parseApplyEditsRequest(args);
+  const parsed = parseApplyEditsRequest(withoutBlankArguments(args));
   if (!parsed.ok) {
     throw new EditingError(parsed.error.code, parsed.error.message, parsed.error.opIndex);
   }

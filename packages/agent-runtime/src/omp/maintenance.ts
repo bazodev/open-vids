@@ -34,6 +34,9 @@ export class MaintenanceRows {
       const attempt = positive(event.attempt);
       const maxAttempts = positive(event.maxAttempts);
       const delaySeconds = Math.ceil(positive(event.delayMs) / 1000);
+      // The provider's own words: without them a failing model reads the same as an overloaded one.
+      const reason =
+        typeof event.errorMessage === "string" ? toolFailureMessage(event.errorMessage) : "";
       this.retries = Math.max(this.retries, attempt);
       const out = this.closeRetry(true);
       this.retryRow = `provider-retry-${(this.counter += 1)}`;
@@ -44,7 +47,7 @@ export class MaintenanceRows {
         targets: [],
         label: `The model provider failed; retrying in ${delaySeconds} s (attempt ${attempt} of ${maxAttempts})`,
         labelCode: "provider_retry",
-        labelParams: { attempt, maxAttempts, delaySeconds },
+        labelParams: { attempt, maxAttempts, delaySeconds, ...(reason && { reason }) },
       });
       return out;
     }

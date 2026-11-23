@@ -115,20 +115,16 @@ has audio and nonempty word timings before building a captioned video. Review
 the timings against the actual audio; transcription is estimated alignment,
 not native TTS timestamps. Do not distribute words evenly across a clip.
 
-- **Models:** `gemini-3.8-flash-tts` (default), `gemini-3.8-flash-lite-tts`,
-  `gemini-3.1-flash-tts-preview`, `gemini-2.5-pro-preview-tts`, and
-  `gemini-2.5-flash-preview-tts`. Use these exact Developer API IDs; Cloud TTS
-  aliases such as `gemini-2.5-flash-tts` are not accepted.
+- **Models:** `gemini-3.8-flash-tts` (default) and `gemini-3.8-flash-lite-tts`.
+  Use these exact Developer API IDs; Cloud TTS aliases and the retired 2.5 and
+  3.1 preview models are not accepted.
 - **Voice:** `Kore` by default; pass another prebuilt voice or an existing custom
-  voice ID for 3.8. Older models require prebuilt voices. Creating or replicating
-  voices is outside this helper.
+  voice ID. Creating or replicating voices is outside this helper.
 - **Delivery:** Put directions in `style`, not in spoken `text`. Each line can
-  override `style`. 3.8 uses structured annotations; older models receive a
-  delivery prompt before the transcript. Check that directions were not spoken.
-  Use style for pacing; numeric `speed` must be omitted or 1.
-- **Audio:** 3.8 returns a complete WAV. Older models return mono 16-bit PCM,
-  which the helper wraps as WAV at the returned sample rate without resampling.
-  No generation calls run during playback or rendering.
+  override `style`; it is sent as a structured annotation. Check that directions
+  were not spoken. Use style for pacing; numeric `speed` must be omitted or 1.
+- **Audio:** The models return a complete WAV. No generation calls run during
+  playback or rendering.
 - **Timing:** This adapter requests no native word timestamps. It uses the
   existing transcription pass. `lang` selects transcription language; Gemini
   infers speech language from the text.

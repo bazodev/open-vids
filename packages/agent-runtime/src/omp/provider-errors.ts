@@ -41,15 +41,19 @@ export function providerFailure(message: string, retries?: { attempts: number })
 const BARE_SECRETS: readonly RegExp[] = [
   /\b(sk|pk|rk|key|tok|ghp|gho|xox[abp])[-_][A-Za-z0-9_-]{12,}/g,
   /Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  // Google API keys.
+  /\bAIza[0-9A-Za-z_-]{20,}/g,
 ];
 const LABELLED_SECRET =
   /\b(api[_-]?key|token|secret|password|authorization)(["']?\s*[=:]\s*["']?)[^\s"',;]{6,}/gi;
+/** `?key=…` in a request URL a provider error may quote. Only `=`: "key: value" is ordinary error prose. */
+const KEY_PARAMETER = /\b(key=)[^\s"'&,;]{6,}/gi;
 
 /** A tool's own failure text, cut to what a chat row shows, with anything that looks like a credential masked. */
 export function toolFailureMessage(text: string): string {
   let clean = text.replace(/\s+/g, " ").trim();
   for (const pattern of BARE_SECRETS) clean = clean.replace(pattern, "[hidden]");
-  clean = clean.replace(LABELLED_SECRET, "$1$2[hidden]");
+  clean = clean.replace(LABELLED_SECRET, "$1$2[hidden]").replace(KEY_PARAMETER, "$1[hidden]");
   return clean.length <= FAILURE_MESSAGE_LIMIT
     ? clean
     : `${clean.slice(0, FAILURE_MESSAGE_LIMIT - 1).trimEnd()}…`;

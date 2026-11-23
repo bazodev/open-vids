@@ -35,27 +35,6 @@
       "source": "https://ai.google.dev/gemini-api/docs/pricing"
     },
     {
-      "providerId": "gemini",
-      "model": "gemini-3.1-flash-tts-preview",
-      "usdPerMinute": 0.03,
-      "usdPer1MInputTokens": 1,
-      "source": "https://ai.google.dev/gemini-api/docs/pricing"
-    },
-    {
-      "providerId": "gemini",
-      "model": "gemini-2.5-flash-preview-tts",
-      "usdPerMinute": 0.015,
-      "usdPer1MInputTokens": 0.5,
-      "source": "https://ai.google.dev/gemini-api/docs/pricing"
-    },
-    {
-      "providerId": "gemini",
-      "model": "gemini-2.5-pro-preview-tts",
-      "usdPerMinute": 0.03,
-      "usdPer1MInputTokens": 1,
-      "source": "https://ai.google.dev/gemini-api/docs/pricing"
-    },
-    {
       "providerId": "openai",
       "model": "tts-1-hd",
       "usdPer1MChars": 30,

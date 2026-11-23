@@ -305,6 +305,48 @@ describe("read_analysis", () => {
   });
 });
 
+describe("plan_cut arguments a model leaves blank", () => {
+  it("reads an empty basedOn, label and order as not given", async () => {
+    const { host, call } = setup();
+    const result = await call("plan_cut", {
+      source: SAMPLE_SOURCE,
+      basedOn: "",
+      label: "  ",
+      order: [],
+    });
+    expect(result.isError).toBeUndefined();
+    expect(host.planRequests[0]).toEqual({ source: SAMPLE_SOURCE });
+  });
+
+  it("keeps the blanks that mean something: no hook, and no take issues to cut", async () => {
+    const { host, call } = setup();
+    const result = await call("plan_cut", {
+      source: SAMPLE_SOURCE,
+      basedOn: "cut-1",
+      hook: null,
+      removeIssues: [],
+    });
+    expect(result.isError).toBeUndefined();
+    expect(host.planRequests[0]).toEqual({
+      source: SAMPLE_SOURCE,
+      basedOn: "cut-1",
+      hook: null,
+      removeIssues: [],
+    });
+  });
+
+  it("still refuses a blank source, and a blank entry in a list", async () => {
+    const { host, call } = setup();
+    expect((await call("plan_cut", { source: "" })).text).toContain(
+      "source must be a non-empty string",
+    );
+    expect((await call("plan_cut", { source: SAMPLE_SOURCE, drop: ["g1", ""] })).text).toContain(
+      "drop[1] must be a non-empty string",
+    );
+    expect(host.planRequests).toHaveLength(0);
+  });
+});
+
 describe("read_analysis paging", () => {
   const issue = (index: number): TakeIssue => ({
     id: `t${index}`,

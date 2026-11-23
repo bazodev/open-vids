@@ -114,6 +114,13 @@ API keys the user enters in OpenVids**, so a user with no OMP login can still us
   applies the difference and rebuilds the catalog, so a key saved by the desktop's runtime reaches a project runtime too.
   (Jev's own API-key mode still uses a private per-session store.) The SDK keeps its own files in the OMP agent
   directory as it always did (`agent.db`, the `models.db` catalog cache, logs) — they hold no OpenVids key.
+- **Default model.** When the OMP config names no default, a turn starts on OMP's default for the connected provider
+  (`pickDefaultAvailableModel`), or on OpenVids' own choice where OMP's does not suit a new user (`START_MODEL_BY_PROVIDER`
+  in `src/omp/model-mapping.ts`: OMP's Gemini default has no free tier, so Gemini starts on `gemini-3.8-flash`). The
+  catalog reports it as `defaultModel`, so every picker shows the model a turn really uses. It is never simply the first
+  model listed: that order is the provider's, and its first entry can be a retired model. Apple's on-device model is
+  left out of the catalog and the provider list (`isAgentProvider`): macOS 27 lists it with nothing connected, and its
+  8K context cannot hold an agent's prompt.
 - **Provider list** (`ProviderInfo`): `id`, `name` (plain display name), `authenticated`, `status`
   (`connected` | `not_configured` | `error` | `signin_required`), `credentialSource` (`omp` | `api-key` | `oauth` | null), `error`
   (a one-line reason), `modelCount`, `keyless` (a local provider that needs no credential) and `verified` (a live model
@@ -1050,8 +1057,8 @@ every tool, which models were seen gluing onto tool names (`i_inspect_timeline`)
 tool names for Anthropic OAuth is the SDK's and cannot be changed here.
 
 What the SDK does around a model call is visible. `auto_retry_start/end` and `auto_compaction_start/end` become labelled
-activity rows (`provider_retry` with `attempt`, `maxAttempts`, `delaySeconds`; `context_compaction`) from start to end
-(`src/omp/maintenance.ts`). A failed tool row carries `Activity.error` (`tool_failed` + the tool's own text, trimmed to 300
+activity rows (`provider_retry` with `attempt`, `maxAttempts`, `delaySeconds` and the provider's `reason`, trimmed and with
+credentials masked, which the row shows under its label; `context_compaction`) from start to end (`src/omp/maintenance.ts`). A failed tool row carries `Activity.error` (`tool_failed` + the tool's own text, trimmed to 300
 characters with anything credential-shaped masked). A provider failure rejects the prompt with a `RuntimeError` classified
 from the message (`provider_auth`, `rate_limited`, `provider_overloaded`, `context_overflow`, else `agent_failed`; says so
 when the SDK retried first; `src/omp/provider-errors.ts`) and `failureCode(error)` (errors.ts) gives the turn's error code.

@@ -50,17 +50,17 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           # Same Bun as CI: the staged app runs on this Bun binary (apps/desktop/scripts/stage-runtime.mjs).
-          bun-version: "1.4.2"
+          bun-version: "1.4.4"
           # The binary is copied into the signed app. A cache entry written by a main-branch CI run
           # (which executes dependency and test code) must never supply it.
           no-cache: true
 
       - name: Verify the Bun binary
         env:
-          # SHA-256 of bun-darwin-aarch64/bun inside the official bun-v1.4.2 release zip (the zip itself is
-          # 90987a3a16d7db556d886ac3d551e7b6d3edf0a1cf43acaed622e8676be1d12f in that release's SHASUMS256.txt).
+          # SHA-256 of bun-darwin-aarch64/bun inside the official bun-v1.4.4 release zip (the zip itself is
+          # c240d7f0ccb90c263a849fcdb09b7ee62630d921348ed6aafda86b9d577bc510 in that release's SHASUMS256.txt).
           # Bump together with bun-version.
-          BUN_SHA256: 35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5
+          BUN_SHA256: 0a2237cdcfa0d16ef501d9acca9f0026309ef348bea7393a64e8d1e3609565cc
         run: |
           set -euo pipefail
           actual="$(shasum -a 256 "$(command -v bun)" | cut -d' ' -f1)"
@@ -162,15 +162,15 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.4"
           no-cache: true
 
       - name: Verify the Bun binary
         env:
-          # SHA-256 of bun-windows-x64/bun.exe inside the official bun-v1.4.2 release zip (the zip itself is
-          # ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405 in that release's SHASUMS256.txt).
+          # SHA-256 of bun-windows-x64/bun.exe inside the official bun-v1.4.4 release zip (the zip itself is
+          # cd2c0fccc78f3ede1f50ca827a15f063eda13d4d150a3d0674f4f6e323d864a5 in that release's SHASUMS256.txt).
           # Bump together with bun-version.
-          BUN_SHA256: 15277c59ccd6c6c20f8dc9716c2b59c1776320d606b6a8658f70be8799519ca4
+          BUN_SHA256: cb1d8e6564e655e49d30cead359750a1cbbd12f42651caa4b62244d7bd93c244
         run: |
           set -euo pipefail
           actual="$(sha256sum "$(command -v bun.exe)" | cut -d' ' -f1)"
