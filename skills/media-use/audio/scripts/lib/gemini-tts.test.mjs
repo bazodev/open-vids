@@ -99,7 +99,12 @@ test("Gemini remains opt-in even with a key and preserves explicitly chosen voic
 test("invalid config fails before spending a generation request", async (t) => {
   const { args } = fixture(t);
   const deps = { fetchImpl: () => assert.fail("must not call the API") };
-  for (const change of [{ model: "gemini-2.5-flash" }, { speed: 1.2 }]) {
+  for (const change of [
+    { model: "gemini-2.5-flash" },
+    { model: "gemini-3.1-flash-tts-preview" },
+    { model: "gemini-2.5-flash-preview-tts" },
+    { speed: 1.2 },
+  ]) {
     const result = await synthesizeGemini({ ...args, ...change }, deps);
     assert.equal(result.ok, false);
     assert.ok(result.error);
@@ -145,46 +150,6 @@ test("incomplete, missing, raw PCM and malformed audio cannot become a successfu
   }
 });
 
-for (const model of [
-  "gemini-3.1-flash-tts-preview",
-  "gemini-2.5-pro-preview-tts",
-  "gemini-2.5-flash-preview-tts",
-]) {
-  test(`${model} uses legacy delivery prompts and wraps PCM as mono WAV`, async (t) => {
-    const { args, wav } = fixture(t);
-    const pcm = wav.subarray(44);
-    const result = await synthesizeGemini(
-      { ...args, model, style: "Warm and clear" },
-      {
-        fetchImpl: async (_, options) => {
-          const body = JSON.parse(options.body);
-          assert.deepEqual(body.response_format, { type: "audio" });
-          assert.equal(body.input[0].content[0].annotations, undefined);
-          assert.ok(body.input[0].content[0].text.endsWith(args.text));
-          assert.ok(body.input[0].content[0].text.includes("Warm and clear"));
-          return Response.json({
-            status: "completed",
-            steps: [
-              {
-                type: "model_output",
-                content: [
-                  {
-                    type: "audio",
-                    mime_type: "audio/L16;codec=pcm;rate=24000",
-                    data: pcm.toString("base64"),
-                  },
-                ],
-              },
-            ],
-          });
-        },
-      },
-    );
-    assert.equal(result.ok, true, result.error);
-    assert.deepEqual(readFileSync(args.wavAbs), wav);
-  });
-}
-
 test("service-account bearer and quota project reach synthesis, and token errors are redacted", async (t) => {
   const { args, payload } = fixture(t);
   const authenticate = () => ({
@@ -207,37 +172,4 @@ test("service-account bearer and quota project reach synthesis, and token errors
   });
   assert.match(failed.error, /HTTP 403/);
   assert.ok(!failed.error.includes("secret-token"));
-});
-
-test("older models reject unsupported PCM and custom voices", async (t) => {
-  const { args } = fixture(t);
-  for (const mime of [
-    "audio/l16",
-    "audio/l16;rate=0",
-    "audio/l16;rate=24000;channels=2",
-    "audio/l16;rate=24000;codec=other",
-  ]) {
-    const result = await synthesizeGemini(
-      { ...args, model: "gemini-3.1-flash-tts-preview" },
-      {
-        fetchImpl: async () =>
-          Response.json({
-            status: "completed",
-            steps: [
-              {
-                type: "model_output",
-                content: [{ type: "audio", mime_type: mime, data: "AAAAAA==" }],
-              },
-            ],
-          }),
-      },
-    );
-    assert.equal(result.ok, false);
-    assert.equal(existsSync(args.wavAbs), false);
-  }
-  const result = await synthesizeGemini(
-    { ...args, model: "gemini-2.5-pro-preview-tts", voiceId: "voice_custom" },
-    { fetchImpl: () => assert.fail("must not generate") },
-  );
-  assert.match(result.error, /Custom Gemini voices require/);
 });

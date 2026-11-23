@@ -14,6 +14,7 @@ import {
   seekCompositionTimeline,
   type ZoomTarget,
 } from "../capture/captureCompositionFrame.js";
+import { GEMINI_VISION_MODEL, leastThinking } from "../capture/geminiVision.js";
 import {
   isClipVisibleAt,
   isInClipWindow,
@@ -921,9 +922,13 @@ export default defineCommand({
             console.log(`   ${c.dim("--describe: GEMINI_API_KEY not set, skipping")}`);
           } else if (paths.length > 0) {
             console.log(`   ${c.dim("Describing frames with Gemini vision...")}`);
-            const { GoogleGenAI } = await loadOptionalPackage("@google/genai", "--describe");
+            const { GoogleGenAI, ThinkingLevel } = await loadOptionalPackage(
+              "@google/genai",
+              "--describe",
+            );
             const ai = new GoogleGenAI({ apiKey: geminiKey });
-            const model = process.env.HYPERFRAMES_GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+            const model = process.env.HYPERFRAMES_GEMINI_MODEL || GEMINI_VISION_MODEL;
+            const thinkingConfig = leastThinking(model, ThinkingLevel);
             const customQuestion =
               describeArg === "true"
                 ? "Describe this video composition frame in 1-2 sentences. Be specific and factual: what elements are visible, what text appears, is the frame blank/black/loading, what is the composition. Flag any obvious problems."
@@ -980,7 +985,7 @@ export default defineCommand({
                       parts: [{ inlineData: { mimeType, data: base64 } }, { text: customQuestion }],
                     },
                   ],
-                  config: { maxOutputTokens: 250 },
+                  config: { maxOutputTokens: 250, ...(thinkingConfig && { thinkingConfig }) },
                 });
                 return { filename, desc: response.text?.trim() || "no description" };
               }),

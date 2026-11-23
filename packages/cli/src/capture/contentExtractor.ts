@@ -23,6 +23,7 @@ import type sharpType from "sharp";
 import type { CatalogedAsset } from "./assetCataloger.js";
 import type { DesignTokens } from "./types.js";
 import { loadOptionalPackage, type OptionalPackageModules } from "../utils/optionalPackages.js";
+import { GEMINI_VISION_MODEL, VERTEX_VISION_LOCATION, leastThinking } from "./geminiVision.js";
 
 const DEFAULT_VISION_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -299,12 +300,11 @@ export async function captionImagesWithGemini(
     provider
   ];
   // Override per provider via HYPERFRAMES_OPENROUTER_MODEL / HYPERFRAMES_VERTEX_MODEL /
-  // HYPERFRAMES_GEMINI_MODEL. Vertex publishes a different model set than the Gemini API —
-  // the API's flash-lite preview id is not resolvable there — so it carries its own default.
+  // HYPERFRAMES_GEMINI_MODEL.
   const model = {
     openrouter: process.env.HYPERFRAMES_OPENROUTER_MODEL || "google/gemini-3.1-flash-lite",
-    vertex: process.env.HYPERFRAMES_VERTEX_MODEL || "gemini-2.5-flash",
-    gemini: process.env.HYPERFRAMES_GEMINI_MODEL || "gemini-3.1-flash-lite-preview",
+    vertex: process.env.HYPERFRAMES_VERTEX_MODEL || GEMINI_VISION_MODEL,
+    gemini: process.env.HYPERFRAMES_GEMINI_MODEL || GEMINI_VISION_MODEL,
   }[provider];
   const requestTimeoutMs = resolveVisionRequestTimeoutMs();
 
@@ -360,8 +360,12 @@ export async function captionImagesWithGemini(
       };
     } else {
       let GoogleGenAI: OptionalPackageModules["@google/genai"]["GoogleGenAI"];
+      let ThinkingLevel: OptionalPackageModules["@google/genai"]["ThinkingLevel"];
       try {
-        ({ GoogleGenAI } = await loadOptionalPackage("@google/genai", "vision captioning"));
+        ({ GoogleGenAI, ThinkingLevel } = await loadOptionalPackage(
+          "@google/genai",
+          "vision captioning",
+        ));
       } catch (err) {
         warnings.push(`Skipped vision captioning: ${(err as Error).message}`);
         internalError = true;
@@ -386,7 +390,7 @@ export async function captionImagesWithGemini(
         ai = new GoogleGenAI({
           vertexai: true,
           project: vertexProject,
-          location: process.env.HYPERFRAMES_VERTEX_LOCATION || "us-central1",
+          location: process.env.HYPERFRAMES_VERTEX_LOCATION || VERTEX_VISION_LOCATION,
           googleAuthOptions: { credentials },
         });
       } else {
@@ -394,6 +398,7 @@ export async function captionImagesWithGemini(
         if (!geminiKey) return geminiCaptions;
         ai = new GoogleGenAI({ apiKey: geminiKey });
       }
+      const thinkingConfig = leastThinking(model, ThinkingLevel);
       captionOne = async ({ mimeType, base64, prompt, maxTokens, timeoutMs }) => {
         const response = await runBoundedVisionRequest(
           (signal) =>
@@ -412,7 +417,7 @@ export async function captionImagesWithGemini(
                 // model can spend the whole budget and return empty text. That surfaces as a
                 // successful request with no caption — the capture then logs "Captioned N/N
                 // images" followed by "0 images captioned", which is what production shows.
-                thinkingConfig: { thinkingBudget: 0 },
+                ...(thinkingConfig && { thinkingConfig }),
                 abortSignal: signal,
                 httpOptions: { timeout: timeoutMs },
               },
