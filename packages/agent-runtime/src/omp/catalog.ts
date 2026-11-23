@@ -9,6 +9,7 @@ import {
   type CreateAgentSessionOptions,
   type ModelRegistry,
 } from "@oh-my-pi/pi-coding-agent";
+import { pickDefaultAvailableModel } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import type {
   AgentModelCatalog,
   ModelSelection,
@@ -16,8 +17,10 @@ import type {
 } from "@hyperframes/agent-protocol";
 import {
   createModelCatalog,
+  isAgentProvider,
   isThinkingEffort,
   parseModelRole,
+  preferredStartModel,
   type ModelCatalogSource,
 } from "./model-mapping.ts";
 
@@ -127,13 +130,16 @@ export function isAvailableModel(
 ): model is OmpModel {
   return (
     model !== undefined &&
+    isAgentProvider(model.provider) &&
     registry.hasConfiguredAuth(model) &&
     registry.getAvailable().some((available) => sameOmpModel(available, model))
   );
 }
 
 export function availableModels(registry: ModelRegistry): OmpModel[] {
-  return registry.getAvailable().filter((model) => registry.hasConfiguredAuth(model));
+  return registry
+    .getAvailable()
+    .filter((model) => isAgentProvider(model.provider) && registry.hasConfiguredAuth(model));
 }
 
 export function resolveRoleDefault(
@@ -163,6 +169,19 @@ export function catalogSources(models: readonly OmpModel[]): ModelCatalogSource[
   }));
 }
 
+/**
+ * The model to start on when no default is configured: OMP's default for the connected provider, or OpenVids' own
+ * where OMP's does not suit a new user. Never simply the first model listed: that order is the provider's, and its
+ * first entry can be a model the provider has already retired.
+ */
+export function pickStartModel(registry: ModelRegistry): OmpModel | undefined {
+  const models = availableModels(registry);
+  const picked = pickDefaultAvailableModel(models, (provider) =>
+    registry.hasConcreteAuth(provider),
+  );
+  return picked && preferredStartModel(picked, models);
+}
+
 export function chooseBackendModel(
   registry: ModelRegistry,
   catalog: CatalogServices["catalog"],
@@ -171,7 +190,7 @@ export function chooseBackendModel(
     const configured = registry.find(catalog.defaultModel.provider, catalog.defaultModel.modelId);
     if (isAvailableModel(registry, configured)) return configured;
   }
-  return availableModels(registry)[0];
+  return pickStartModel(registry);
 }
 
 export function toModelSelection(model: OmpModel): ModelSelection {
@@ -185,5 +204,11 @@ export function createCatalog(
   const models = availableModels(registry);
   const defaultRole = settings.getModelRole("default");
   const roleDefault = resolveRoleDefault(registry, defaultRole);
-  return createModelCatalog(catalogSources(models), defaultRole, roleDefault.thinking);
+  const start = pickStartModel(registry);
+  return createModelCatalog(
+    catalogSources(models),
+    defaultRole,
+    roleDefault.thinking,
+    start ? toModelSelection(start) : null,
+  );
 }

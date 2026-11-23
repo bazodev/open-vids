@@ -66,25 +66,61 @@ export function parseModelRole(value: string | undefined): ParsedModelRole | nul
   return { model: { provider, modelId }, thinking };
 }
 
+/**
+ * Apple's on-device model is listed on every macOS 27 Mac with nothing connected, and its 8K context cannot hold an
+ * agent's prompt. Counted as a model, it would stand in for the "connect a model" prompt a new user needs.
+ */
+const PROVIDERS_NOT_FOR_AGENTS: ReadonlySet<string> = new Set(["apple"]);
+
+export function isAgentProvider(provider: string): boolean {
+  return !PROVIDERS_NOT_FOR_AGENTS.has(provider);
+}
+
+/**
+ * The model to start on for a provider where OMP's own default does not suit a new user. The first turn has to work
+ * on the account they just created.
+ */
+const START_MODEL_BY_PROVIDER: Readonly<Record<string, string>> = {
+  // OMP's default is a preview with no free tier, so a free key fails on its first turn. Google's current Flash has
+  // one, and it is the model Google's own retirement errors point to.
+  google: "gemini-3.8-flash",
+};
+
+/** `picked`, or OpenVids' own start model of the same provider when one is set and available. */
+export function preferredStartModel<T extends { provider: string; id: string }>(
+  picked: T,
+  available: readonly T[],
+): T {
+  const preferredId = START_MODEL_BY_PROVIDER[picked.provider];
+  if (preferredId === undefined) return picked;
+  return (
+    available.find((model) => model.provider === picked.provider && model.id === preferredId) ??
+    picked
+  );
+}
+
+/**
+ * `startModel` is what the runtime starts on when the user's OMP config names no usable default, so that the app shows
+ * the model a turn will really use. Thinking comes from the role alone.
+ */
 export function createModelCatalog(
   sources: readonly ModelCatalogSource[],
   defaultRole: string | undefined,
   defaultThinking: ThinkingEffort | null,
+  startModel: ModelSelection | null = null,
 ): AgentModelCatalog {
   const models = sources.map(mapModelInfo);
-  const role = parseModelRole(defaultRole);
-  const defaultModel =
-    role &&
+  const listed = (selection: ModelSelection): boolean =>
     models.some(
-      (model) => model.provider === role.model.provider && model.modelId === role.model.modelId,
-    )
-      ? role.model
-      : null;
+      (model) => model.provider === selection.provider && model.modelId === selection.modelId,
+    );
+  const role = parseModelRole(defaultRole);
+  const roleModel = role && listed(role.model) ? role.model : null;
 
   return {
     models,
-    defaultModel,
-    defaultThinking: defaultModel ? defaultThinking : null,
+    defaultModel: roleModel ?? (startModel && listed(startModel) ? startModel : null),
+    defaultThinking: roleModel ? defaultThinking : null,
   };
 }
 
