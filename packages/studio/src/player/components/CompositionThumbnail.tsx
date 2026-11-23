@@ -1,7 +1,13 @@
-import { memo, useMemo, type CSSProperties } from "react";
+import { memo, useMemo, useState, type CSSProperties } from "react";
 import { useThumbnailLease } from "../../hooks/useThumbnailLease";
 import { useThumbnailStripSize } from "../../hooks/useThumbnailStripSize";
-import { createThumbnailKey, type ThumbnailPriority } from "../lib/thumbnailScheduler";
+import {
+  createThumbnailKey,
+  type ThumbnailPriority,
+  type ThumbnailRequest,
+  type ThumbnailSnapshot,
+  type ThumbnailValue,
+} from "../lib/thumbnailScheduler";
 import { TIMELINE_VIEWPORT_BUDGETS } from "../lib/timelineViewportBudgets";
 import { computeThumbnailStrip, probeImageAspect } from "./thumbnailUtils";
 
@@ -107,6 +113,30 @@ async function loadCompositionImage(url: string, signal: AbortSignal) {
   }
 }
 
+function posterOf(snapshot: ThumbnailSnapshot): Extract<ThumbnailValue, { kind: "image" }> | null {
+  return snapshot.status === "ready" && snapshot.value.kind === "image" ? snapshot.value : null;
+}
+
+/**
+ * The poster to draw for `request`: its own once it is ready, until then the last ready poster of the same picture
+ * (`slot`: everything that identifies it but the content revision). Any saved edit gives the composition a new
+ * revision, and without this every poster on the timeline would vanish until Chrome has rendered it again. The last
+ * ready poster keeps a lease of its own, which is what keeps its blob URL alive after the request moved on.
+ */
+function useHeldPoster(request: ThumbnailRequest, slot: string) {
+  const snapshot = useThumbnailLease(request);
+  const fresh = posterOf(snapshot);
+  const [held, setHeld] = useState<{ request: ThumbnailRequest; slot: string } | null>(null);
+  if (fresh && (held?.request.key !== request.key || held.slot !== slot)) {
+    setHeld({ request, slot });
+  } else if (!fresh && held && held.slot !== slot) {
+    setHeld(null);
+  }
+  const heldSnapshot = useThumbnailLease(held?.request ?? null);
+  const poster = fresh ?? (held?.slot === slot ? posterOf(heldSnapshot) : null);
+  return { poster, loading: snapshot.status === "loading" && poster === null };
+}
+
 /** Server-rendered composition poster, deduplicated and budgeted by project/session. */
 export const CompositionThumbnail = memo(function CompositionThumbnail({
   previewUrl,
@@ -143,9 +173,19 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     }),
     [priority, projectId, sessionEpoch, url],
   );
-  const snapshot = useThumbnailLease(request);
-  const value =
-    snapshot.status === "ready" && snapshot.value.kind === "image" ? snapshot.value : null;
+  const slot = createThumbnailKey({
+    project: projectId,
+    session: sessionEpoch,
+    url: buildCompositionThumbnailUrl({
+      previewUrl,
+      seekTime,
+      duration,
+      selector,
+      selectorIndex,
+      origin: window.location.origin,
+    }),
+  });
+  const { poster: value, loading } = useHeldPoster(request, slot);
   const { frameW, frameCount } = computeThumbnailStrip(
     container.width,
     value?.aspect ?? 16 / 9,
@@ -181,9 +221,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
           ))}
         </div>
       )}
-      {snapshot.status === "loading" && (
-        <div className="absolute inset-0 animate-pulse bg-white/[0.035]" />
-      )}
+      {loading && <div className="absolute inset-0 animate-pulse bg-white/[0.035]" />}
       {label && (
         <div className="absolute inset-y-0 left-3 z-10 flex items-center">
           <span
